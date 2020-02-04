@@ -9,6 +9,8 @@ import { invariant, currentDebugStack } from '../helpers/help';
 import { fieldInfoOfKey, joinKeys, prefixKey } from './keys';
 import { defer } from './timing';
 
+import { observable } from 'mobx';
+
 type Dict<T> = Record<string, T>;
 type KeyMap<T> = Map<string, T>;
 type OptimisticMap<T> = Record<number, T>;
@@ -32,7 +34,7 @@ export interface InMemoryData {
   storage: StorageAdapter | null;
 }
 
-export const makeDict = (): any => Object.create(null);
+export const makeDict = (): any => observable({});
 
 let currentData: null | InMemoryData = null;
 let currentDependencies: null | Set<string> = null;
@@ -49,7 +51,8 @@ export const initDataState = (
   data: InMemoryData,
   optimisticKey: number | null
 ) => {
-  currentData = data;
+  //@ts-ignore
+  window.currentData = currentData = data;
   currentDependencies = new Set();
   currentOptimisticKey = optimisticKey;
   if (process.env.NODE_ENV !== 'production') {
@@ -169,6 +172,27 @@ const getNode = <T>(
   // Otherwise we read the non-optimistic base value
   const node = map.base.get(entityKey);
   return node !== undefined ? node[fieldKey] : undefined;
+};
+
+/** Gets a node value from a NodeMap (taking optimistic values into account */
+const getNodeParent = <T>(
+  map: NodeMap<T>,
+  entityKey: string,
+  fieldKey: string
+): Record<string, T | undefined> | undefined => {
+  // This first iterates over optimistic layers (in order)
+  for (let i = 0, l = map.keys.length; i < l; i++) {
+    const optimistic = map.optimistic[map.keys[i]];
+    const node = optimistic.get(entityKey);
+    // If the node and node value exists it is returned, including undefined
+    if (node !== undefined && fieldKey in node) {
+      return node;
+    }
+  }
+
+  // Otherwise we read the non-optimistic base value
+  const node = map.base.get(entityKey);
+  return node !== undefined ? node : undefined;
 };
 
 /** Clears an optimistic layers from a NodeMap */
@@ -335,6 +359,14 @@ export const readRecord = (
 ): EntityField => {
   updateDependencies(entityKey, fieldKey);
   return getNode(currentData!.records, entityKey, fieldKey);
+};
+
+export const readParent = (
+  entityKey: string,
+  fieldKey: string
+): EntityField => {
+  updateDependencies(entityKey, fieldKey);
+  return getNodeParent(currentData!.records, entityKey, fieldKey);
 };
 
 /** Reads an entity's link from data */

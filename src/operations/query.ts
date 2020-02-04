@@ -251,7 +251,9 @@ const readSelection = (
     const fieldAlias = getFieldAlias(node);
     const fieldKey = keyOfField(fieldName, fieldArgs);
     const fieldValue = InMemoryData.readRecord(entityKey, fieldKey);
+    const fieldParent = InMemoryData.readParent(entityKey, fieldKey);
     const key = joinKeys(entityKey, fieldKey);
+    let pleaseDontAssign = false;
 
     if (process.env.NODE_ENV !== 'production' && schemaPredicates && typename) {
       schemaPredicates.isFieldAvailableOnType(typename, fieldName);
@@ -309,6 +311,13 @@ const readSelection = (
     } else if (node.selectionSet === undefined) {
       // The field is a scalar and can be retrieved directly
       dataFieldValue = fieldValue;
+      pleaseDontAssign = true;
+      Object.defineProperty(data, fieldAlias, {
+        get: () =>
+          fieldParent !== null && fieldParent !== undefined
+            ? fieldParent[fieldAlias]
+            : undefined,
+      });
     } else {
       // We have a selection set which means that we'll be checking for links
       const link = InMemoryData.readLink(entityKey, fieldKey);
@@ -345,7 +354,9 @@ const readSelection = (
     } else {
       // Otherwise continue as usual
       hasFields = true;
-      data[fieldAlias] = dataFieldValue;
+      if (pleaseDontAssign === false) {
+        data[fieldAlias] = dataFieldValue;
+      }
     }
   }
 
