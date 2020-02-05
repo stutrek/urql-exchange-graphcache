@@ -77,6 +77,7 @@
     }
   },
   "dependencies": {
+    "mobx": "5.15.4",
     "wonka": "^3.2.1 || ^4.0.0"
   },
   "peerDependencies": {
