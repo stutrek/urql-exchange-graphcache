@@ -1,5 +1,5 @@
 import { FieldNode, DocumentNode, FragmentDefinitionNode } from 'graphql';
-
+import { action } from 'mobx';
 import {
   getFragments,
   getMainOperation,
@@ -221,176 +221,186 @@ export const readFragment = (
   );
 };
 
-const readSelection = (
-  ctx: Context,
-  entityKey: string,
-  select: SelectionSet,
-  data: Data
-): Data | undefined => {
-  const { store, schemaPredicates } = ctx;
-  const isQuery = entityKey === store.getRootKey('query');
+const readSelection = action(
+  (
+    ctx: Context,
+    entityKey: string,
+    select: SelectionSet,
+    data: Data
+  ): Data | undefined => {
+    const { store, schemaPredicates } = ctx;
+    const isQuery = entityKey === store.getRootKey('query');
 
-  // Get the __typename field for a given entity to check that it exists
-  const typename = !isQuery
-    ? InMemoryData.readRecord(entityKey, '__typename')
-    : entityKey;
-  if (typeof typename !== 'string') {
-    return undefined;
-  }
-
-  data.__typename = typename;
-  const iter = new SelectionIterator(typename, entityKey, select, ctx);
-
-  let node: FieldNode | void;
-  let hasFields = false;
-  let hasPartials = false;
-  while ((node = iter.next()) !== undefined) {
-    // Derive the needed data from our node.
-    const fieldName = getName(node);
-    const fieldArgs = getFieldArguments(node, ctx.variables);
-    const fieldAlias = getFieldAlias(node);
-    const fieldKey = keyOfField(fieldName, fieldArgs);
-    const fieldValue = InMemoryData.readRecord(entityKey, fieldKey);
-    const fieldParent = InMemoryData.readParent(entityKey, fieldKey);
-    const key = joinKeys(entityKey, fieldKey);
-    let pleaseDontAssign = false;
-
-    if (process.env.NODE_ENV !== 'production' && schemaPredicates && typename) {
-      schemaPredicates.isFieldAvailableOnType(typename, fieldName);
+    // Get the __typename field for a given entity to check that it exists
+    const typename = !isQuery
+      ? InMemoryData.readRecord(entityKey, '__typename')
+      : entityKey;
+    if (typeof typename !== 'string') {
+      return undefined;
     }
 
-    // We temporarily store the data field in here, but undefined
-    // means that the value is missing from the cache
-    let dataFieldValue: void | DataField;
+    data.__typename = typename;
+    const iter = new SelectionIterator(typename, entityKey, select, ctx);
 
-    const resolvers = store.resolvers[typename];
-    if (resolvers !== undefined && typeof resolvers[fieldName] === 'function') {
-      // We have to update the information in context to reflect the info
-      // that the resolver will receive
-      ctx.parentTypeName = typename;
-      ctx.parentKey = entityKey;
-      ctx.parentFieldKey = key;
-      ctx.fieldName = fieldName;
-
-      // We have a resolver for this field.
-      // Prepare the actual fieldValue, so that the resolver can use it
-      if (fieldValue !== undefined) {
-        data[fieldAlias] = fieldValue;
-      }
-
-      dataFieldValue = resolvers[fieldName](
-        data,
-        fieldArgs || makeDict(),
-        store,
-        ctx
-      );
-
-      if (node.selectionSet !== undefined) {
-        // When it has a selection set we are resolving an entity with a
-        // subselection. This can either be a list or an object.
-        dataFieldValue = resolveResolverResult(
-          ctx,
-          typename,
-          fieldName,
-          key,
-          getSelectionSet(node),
-          (data[fieldAlias] as Data) || makeDict(),
-          dataFieldValue
-        );
-      }
+    let node: FieldNode | void;
+    let hasFields = false;
+    let hasPartials = false;
+    while ((node = iter.next()) !== undefined) {
+      // Derive the needed data from our node.
+      const fieldName = getName(node);
+      const fieldArgs = getFieldArguments(node, ctx.variables);
+      const fieldAlias = getFieldAlias(node);
+      const fieldKey = keyOfField(fieldName, fieldArgs);
+      const fieldValue = InMemoryData.readRecord(entityKey, fieldKey);
+      const fieldParent = InMemoryData.readParent(entityKey, fieldKey);
+      const key = joinKeys(entityKey, fieldKey);
+      let pleaseDontAssign = false;
 
       if (
-        schemaPredicates !== undefined &&
-        dataFieldValue === null &&
-        !schemaPredicates.isFieldNullable(typename, fieldName)
+        process.env.NODE_ENV !== 'production' &&
+        schemaPredicates &&
+        typename
       ) {
-        // Special case for when null is not a valid value for the
-        // current field
-        return undefined;
+        schemaPredicates.isFieldAvailableOnType(typename, fieldName);
       }
-    } else if (node.selectionSet === undefined) {
-      // The field is a scalar and can be retrieved directly
-      dataFieldValue = fieldValue;
-      pleaseDontAssign = true;
-      Object.defineProperty(data, fieldAlias, {
-        get: () =>
-          fieldParent !== null && fieldParent !== undefined
-            ? fieldParent[fieldAlias]
-            : undefined,
-      });
-    } else {
-      // We have a selection set which means that we'll be checking for links
-      const link = InMemoryData.readLink(entityKey, fieldKey);
-      if (link !== undefined && link !== null) {
-        dataFieldValue = resolveLink(
-          ctx,
-          link,
-          typename,
-          fieldName,
-          getSelectionSet(node),
-          data[fieldAlias] as Data
+
+      // We temporarily store the data field in here, but undefined
+      // means that the value is missing from the cache
+      let dataFieldValue: void | DataField;
+
+      const resolvers = store.resolvers[typename];
+      if (
+        resolvers !== undefined &&
+        typeof resolvers[fieldName] === 'function'
+      ) {
+        // We have to update the information in context to reflect the info
+        // that the resolver will receive
+        ctx.parentTypeName = typename;
+        ctx.parentKey = entityKey;
+        ctx.parentFieldKey = key;
+        ctx.fieldName = fieldName;
+
+        // We have a resolver for this field.
+        // Prepare the actual fieldValue, so that the resolver can use it
+        if (fieldValue !== undefined) {
+          data[fieldAlias] = fieldValue;
+        }
+
+        dataFieldValue = resolvers[fieldName](
+          data,
+          fieldArgs || makeDict(),
+          store,
+          ctx
         );
 
-        if (data[fieldAlias] === undefined) {
-          console.log({data, node, dataFieldValue, fieldAlias, selectionSet: getSelectionSet(node), link, entityKey, fieldKey, ctx})
-          pleaseDontAssign = true;
-          const myNode = node;
+        if (node.selectionSet !== undefined) {
+          // When it has a selection set we are resolving an entity with a
+          // subselection. This can either be a list or an object.
+          dataFieldValue = resolveResolverResult(
+            ctx,
+            typename,
+            fieldName,
+            key,
+            getSelectionSet(node),
+            (data[fieldAlias] as Data) || makeDict(),
+            dataFieldValue
+          );
+        }
 
+        if (
+          schemaPredicates !== undefined &&
+          dataFieldValue === null &&
+          !schemaPredicates.isFieldNullable(typename, fieldName)
+        ) {
+          // Special case for when null is not a valid value for the
+          // current field
+          return undefined;
+        }
+      } else if (node.selectionSet === undefined) {
+        // The field is a scalar and can be retrieved directly
+        dataFieldValue = fieldValue;
+        pleaseDontAssign = true;
+        if (data[fieldAlias] === undefined) {
           Object.defineProperty(data, fieldAlias, {
             get: () => {
-              console.log({data, fieldAlias, entityKey, fieldKey})
-              const link2 = InMemoryData.readLink(entityKey, fieldKey);
-              console.log(link2);
-              if (link2 !== undefined && link2 !== null) {
-                const linkedEntity = resolveLink(
-                  ctx,
-                  link2,
-                  typename,
-                  fieldName,
-                  getSelectionSet(myNode),
-                  dataFieldValue as Data
-                )
-                dataFieldValue = linkedEntity !== null && linkedEntity !== undefined ? linkedEntity[fieldAlias] : undefined;
-                console.log({linkedEntity})
-                return dataFieldValue || null;
-              }
-              return null;
-            }
+              return fieldParent !== null && fieldParent !== undefined
+                ? fieldParent[fieldAlias]
+                : undefined;
+            },
           });
         }
-      } else if (typeof fieldValue === 'object' && fieldValue !== null) {
-        // The entity on the field was invalid but can still be recovered
-        dataFieldValue = fieldValue;
+      } else {
+        // We have a selection set which means that we'll be checking for links
+        const link = InMemoryData.readLink(entityKey, fieldKey);
+        if (link !== undefined) {
+          dataFieldValue = resolveLink(
+            ctx,
+            link,
+            typename,
+            fieldName,
+            getSelectionSet(node),
+            data[fieldAlias] as Data
+          );
+
+          if (data[fieldAlias] === undefined) {
+            pleaseDontAssign = true;
+            const localNode = node;
+            const localTypeName = typename;
+            Object.defineProperty(data, fieldAlias, {
+              get: () => {
+                const localLink = InMemoryData.readLink(entityKey, fieldKey);
+                if (!localLink) {
+                  return undefined;
+                }
+
+                const linkedEntity = resolveLink(
+                  ctx,
+                  localLink,
+                  localTypeName,
+                  fieldName,
+                  getSelectionSet(localNode),
+                  undefined
+                );
+                return linkedEntity !== null && linkedEntity !== undefined
+                  ? linkedEntity
+                  : undefined;
+              },
+            });
+          }
+        } else if (typeof fieldValue === 'object' && fieldValue !== null) {
+          // The entity on the field was invalid but can still be recovered
+          dataFieldValue = fieldValue;
+        }
+      }
+
+      // Now that dataFieldValue has been retrieved it'll be set on data
+      // If it's uncached (undefined) but nullable we can continue assembling
+      // a partial query result
+      if (
+        dataFieldValue === undefined &&
+        schemaPredicates !== undefined &&
+        schemaPredicates.isFieldNullable(typename, fieldName)
+      ) {
+        // The field is uncached but we have a schema that says it's nullable
+        // Set the field to null and continue
+        hasPartials = true;
+        data[fieldAlias] = null;
+      } else if (dataFieldValue === undefined) {
+        // The field is uncached and not nullable; return undefined
+        return undefined;
+      } else {
+        // Otherwise continue as usual
+        hasFields = true;
+        if (pleaseDontAssign === false) {
+          data[fieldAlias] = dataFieldValue;
+        }
       }
     }
 
-    // Now that dataFieldValue has been retrieved it'll be set on data
-    // If it's uncached (undefined) but nullable we can continue assembling
-    // a partial query result
-    if (
-      dataFieldValue === undefined &&
-      schemaPredicates !== undefined &&
-      schemaPredicates.isFieldNullable(typename, fieldName)
-    ) {
-      // The field is uncached but we have a schema that says it's nullable
-      // Set the field to null and continue
-      hasPartials = true;
-      data[fieldAlias] = null;
-    } else if (dataFieldValue === undefined) {
-      // The field is uncached and not nullable; return undefined
-      return undefined;
-    } else {
-      // Otherwise continue as usual
-      hasFields = true;
-      if (pleaseDontAssign === false) {
-        data[fieldAlias] = dataFieldValue;
-      }
-    }
+    if (hasPartials) ctx.partial = true;
+    return isQuery && hasPartials && !hasFields ? undefined : data;
   }
-
-  if (hasPartials) ctx.partial = true;
-  return isQuery && hasPartials && !hasFields ? undefined : data;
-};
+);
 
 const readResolverResult = (
   ctx: Context,
@@ -602,6 +612,7 @@ const resolveLink = (
   } else if (link === null) {
     return null;
   } else {
+    // console.log({link, prevData})
     return readSelection(
       ctx,
       link,
