@@ -26,7 +26,7 @@ import {
   Store,
   getCurrentDependencies,
   initDataState,
-  clearDataState,
+  // clearDataState,
   makeDict,
   joinKeys,
   keyOfField,
@@ -62,7 +62,7 @@ export const query = (
 ): QueryResult => {
   initDataState(store.data, 0);
   const result = read(store, request, data);
-  clearDataState();
+  // clearDataState();
   return result;
 };
 
@@ -321,7 +321,7 @@ const readSelection = (
     } else {
       // We have a selection set which means that we'll be checking for links
       const link = InMemoryData.readLink(entityKey, fieldKey);
-      if (link !== undefined) {
+      if (link !== undefined && link !== null) {
         dataFieldValue = resolveLink(
           ctx,
           link,
@@ -330,6 +330,34 @@ const readSelection = (
           getSelectionSet(node),
           data[fieldAlias] as Data
         );
+
+        if (data[fieldAlias] === undefined) {
+          console.log({data, node, dataFieldValue, fieldAlias, selectionSet: getSelectionSet(node), link, entityKey, fieldKey, ctx})
+          pleaseDontAssign = true;
+          const myNode = node;
+
+          Object.defineProperty(data, fieldAlias, {
+            get: () => {
+              console.log({data, fieldAlias, entityKey, fieldKey})
+              const link2 = InMemoryData.readLink(entityKey, fieldKey);
+              console.log(link2);
+              if (link2 !== undefined && link2 !== null) {
+                const linkedEntity = resolveLink(
+                  ctx,
+                  link2,
+                  typename,
+                  fieldName,
+                  getSelectionSet(myNode),
+                  dataFieldValue as Data
+                )
+                dataFieldValue = linkedEntity !== null && linkedEntity !== undefined ? linkedEntity[fieldAlias] : undefined;
+                console.log({linkedEntity})
+                return dataFieldValue || null;
+              }
+              return null;
+            }
+          });
+        }
       } else if (typeof fieldValue === 'object' && fieldValue !== null) {
         // The entity on the field was invalid but can still be recovered
         dataFieldValue = fieldValue;
