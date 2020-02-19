@@ -1,1196 +1,2242 @@
-"use strict";
+'use strict';
 
-var mobx = require("mobx"), graphql = require("graphql"), core = require("urql/core"), wonka = require("wonka");
+var mobx = require('mobx');
+var graphql = require('graphql');
+var core = require('urql/core');
+var wonka = require('wonka');
 
 function _extends() {
-  return (_extends = Object.assign || function(a) {
-    for (var b = 1; b < arguments.length; b++) {
-      var d, c = arguments[b];
-      for (d in c) {
-        Object.prototype.hasOwnProperty.call(c, d) && (a[d] = c[d]);
+  _extends = Object.assign || function (target) {
+    for (var i = 1; i < arguments.length; i++) {
+      var source = arguments[i];
+
+      for (var key in source) {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+          target[key] = source[key];
+        }
       }
     }
-    return a;
-  }).apply(this, arguments);
+
+    return target;
+  };
+
+  return _extends.apply(this, arguments);
 }
 
-var getName = function(a) {
-  return a.name.value;
-}, getFragmentTypeName = function(a) {
-  return a.typeCondition.name.value;
-}, getFieldAlias = function(a) {
-  return void 0 !== a.alias ? a.alias.value : getName(a);
-}, getSelectionSet = function(a) {
-  return void 0 !== a.selectionSet ? a.selectionSet.selections : [];
-}, getTypeCondition = function(a) {
-  return void 0 !== (a = a.typeCondition) ? getName(a) : null;
-}, isFieldNode = function(a) {
-  return a.kind === graphql.Kind.FIELD;
-}, isInlineFragment = function(a) {
-  return a.kind === graphql.Kind.INLINE_FRAGMENT;
-}, unwrapType = function(a) {
-  return graphql.isWrappingType(a) ? unwrapType(a.ofType) : a || null;
-}, helpUrl = "\nhttps://github.com/FormidableLabs/urql-exchange-graphcache/blob/master/docs/help.md#", cache = new Set, currentDebugStack = [], pushDebugNode = function(a, b) {
-  var c = "";
-  b.kind === graphql.Kind.INLINE_FRAGMENT ? c = a ? 'Inline Fragment on "' + a + '"' : "Inline Fragment" : b.kind === graphql.Kind.OPERATION_DEFINITION ? c = (b.name ? '"' + b.name.value + '"' : "Unnamed") + " " + b.operation : b.kind === graphql.Kind.FRAGMENT_DEFINITION && (c = '"' + b.name.value + '" Fragment');
-  c && currentDebugStack.push(c);
-}, getDebugOutput = function() {
-  return currentDebugStack.length ? "\n(Caused At: " + currentDebugStack.join(", ") + ")" : "";
+/** Returns the name of a given node */
+
+var getName = function (node) {
+  return node.name.value;
+};
+var getFragmentTypeName = function (node) {
+  return node.typeCondition.name.value;
+};
+/** Returns either the field's name or the field's alias */
+
+var getFieldAlias = function (node) {
+  return node.alias !== undefined ? node.alias.value : getName(node);
+};
+/** Returns the SelectionSet for a given inline or defined fragment node */
+
+var getSelectionSet = function (node) {
+  return node.selectionSet !== undefined ? node.selectionSet.selections : [];
+};
+var getTypeCondition = function (ref) {
+  var typeCondition = ref.typeCondition;
+  return typeCondition !== undefined ? getName(typeCondition) : null;
+};
+var isFieldNode = function (node) {
+  return node.kind === graphql.Kind.FIELD;
+};
+var isInlineFragment = function (node) {
+  return node.kind === graphql.Kind.INLINE_FRAGMENT;
+};
+var unwrapType = function (type) {
+  if (graphql.isWrappingType(type)) {
+    return unwrapType(type.ofType);
+  }
+
+  return type || null;
 };
 
-function invariant(a, b, c) {
-  if (!a) {
-    throw a = b || "Minfied Error #" + c + "\n", "production" !== process.env.NODE_ENV && (a += getDebugOutput()), 
-    (c = Error(a + helpUrl + c)).name = "Graphcache Error", c;
+// These are guards that are used throughout the codebase to warn or error on
+var helpUrl = '\nhttps://github.com/FormidableLabs/urql-exchange-graphcache/blob/master/docs/help.md#';
+var cache = new Set();
+var currentDebugStack = [];
+var pushDebugNode = function (typename, node) {
+  var identifier = '';
+
+  if (node.kind === graphql.Kind.INLINE_FRAGMENT) {
+    identifier = typename ? "Inline Fragment on \"" + typename + "\"" : 'Inline Fragment';
+  } else if (node.kind === graphql.Kind.OPERATION_DEFINITION) {
+    var name = node.name ? "\"" + node.name.value + "\"" : 'Unnamed';
+    identifier = name + " " + node.operation;
+  } else if (node.kind === graphql.Kind.FRAGMENT_DEFINITION) {
+    identifier = "\"" + node.name.value + "\" Fragment";
+  }
+
+  if (identifier) {
+    currentDebugStack.push(identifier);
+  }
+};
+
+var getDebugOutput = function () {
+  return currentDebugStack.length ? '\n(Caused At: ' + currentDebugStack.join(', ') + ')' : '';
+};
+
+function invariant(condition, message, code) {
+  if (!condition) {
+    var errorMessage = message || 'Minfied Error #' + code + '\n';
+
+    if (process.env.NODE_ENV !== 'production') {
+      errorMessage += getDebugOutput();
+    }
+
+    var error = new Error(errorMessage + helpUrl + code);
+    error.name = 'Graphcache Error';
+    throw error;
+  }
+}
+function warn(message, code) {
+  if (!cache.has(message)) {
+    console.warn(message + getDebugOutput() + helpUrl + code);
+    cache.add(message);
   }
 }
 
-function warn(a, b) {
-  cache.has(a) || (console.warn(a + getDebugOutput() + helpUrl + b), cache.add(a));
-}
+var keyOfField = function (fieldName, args) {
+  return args ? fieldName + "(" + core.stringifyVariables(args) + ")" : fieldName;
+};
+var fieldInfoOfKey = function (fieldKey) {
+  var parenIndex = fieldKey.indexOf('(');
 
-var keyOfField = function(a, b) {
-  return b ? a + "(" + core.stringifyVariables(b) + ")" : a;
-}, fieldInfoOfKey = function(a) {
-  var b = a.indexOf("(");
-  return -1 < b ? {
-    fieldKey: a,
-    fieldName: a.slice(0, b),
-    arguments: JSON.parse(a.slice(b + 1, -1))
-  } : {
-    fieldKey: a,
-    fieldName: a,
-    arguments: null
-  };
-}, joinKeys = function(a, b) {
-  return a + "." + b;
-}, prefixKey = function(a, b) {
-  return a + "|" + b;
-}, defer = "production" === process.env.NODE_ENV && "undefined" != typeof Promise ? Promise.prototype.then.bind(Promise.resolve()) : function(a) {
-  return setTimeout(a, 0);
-}, makeDict = function() {
+  if (parenIndex > -1) {
+    return {
+      fieldKey: fieldKey,
+      fieldName: fieldKey.slice(0, parenIndex),
+      arguments: JSON.parse(fieldKey.slice(parenIndex + 1, -1))
+    };
+  } else {
+    return {
+      fieldKey: fieldKey,
+      fieldName: fieldKey,
+      arguments: null
+    };
+  }
+};
+var joinKeys = function (parentKey, key) {
+  return parentKey + "." + key;
+};
+/** Prefix key with its owner type Link / Record */
+
+var prefixKey = function (owner, key) {
+  return owner + "|" + key;
+};
+
+var defer = process.env.NODE_ENV === 'production' && typeof Promise !== 'undefined' ? Promise.prototype.then.bind(Promise.resolve()) : function (fn) {
+  return setTimeout(fn, 0);
+};
+
+var makeDict = function () {
   return mobx.observable({});
-}, currentData = null, currentDependencies = null, currentOptimisticKey = null, makeNodeMap = function() {
+};
+var currentData = null;
+var currentDependencies = null;
+var currentOptimisticKey = null;
+
+var makeNodeMap = function () {
   return {
     optimistic: makeDict(),
-    base: new Map,
+    base: new Map(),
     keys: []
   };
-}, initDataState = function(a, b) {
-  window.currentData = currentData = a;
-  currentDependencies = new Set;
-  currentOptimisticKey = b;
-  "production" !== process.env.NODE_ENV && (currentDebugStack.length = 0);
-}, clearDataState = function() {
-  var c = currentData;
-  !c.gcScheduled && 0 < c.gcBatch.size && (c.gcScheduled = !0, defer((function a() {
-    gc(c);
-  })));
-  c.storage && !c.persistenceScheduled && (c.persistenceScheduled = !0, defer((function b() {
-    c.storage.write(c.persistenceBatch);
-    c.persistenceScheduled = !1;
-    c.persistenceBatch = makeDict();
-  })));
-  currentOptimisticKey = currentDependencies = currentData = null;
-  "production" !== process.env.NODE_ENV && (currentDebugStack.length = 0);
-}, getCurrentDependencies = function() {
-  invariant(null !== currentDependencies, "production" !== process.env.NODE_ENV ? "Invalid Cache call: The cache may only be accessed or mutated duringoperations like write or query, or as part of its resolvers, updaters, or optimistic configs." : "", 2);
+};
+/** Before reading or writing the global state needs to be initialised */
+
+
+var initDataState = function (data, optimisticKey) {
+  //@ts-ignore
+  window.currentData = currentData = data;
+  currentDependencies = new Set();
+  currentOptimisticKey = optimisticKey;
+
+  if (process.env.NODE_ENV !== 'production') {
+    currentDebugStack.length = 0;
+  }
+};
+/** Reset the data state after read/write is complete */
+
+var clearDataState = function () {
+  var data = currentData;
+
+  function _ref() {
+    gc(data);
+  }
+
+  if (!data.gcScheduled && data.gcBatch.size > 0) {
+    data.gcScheduled = true;
+    defer(_ref);
+  }
+
+  function _ref2() {
+    data.storage.write(data.persistenceBatch);
+    data.persistenceScheduled = false;
+    data.persistenceBatch = makeDict();
+  }
+
+  if (data.storage && !data.persistenceScheduled) {
+    data.persistenceScheduled = true;
+    defer(_ref2);
+  }
+
+  currentData = null;
+  currentDependencies = null;
+  currentOptimisticKey = null;
+
+  if (process.env.NODE_ENV !== 'production') {
+    currentDebugStack.length = 0;
+  }
+};
+/** As we're writing, we keep around all the records and links we've read or have written to */
+
+var getCurrentDependencies = function () {
+  invariant(currentDependencies !== null, process.env.NODE_ENV !== "production" ? 'Invalid Cache call: The cache may only be accessed or mutated during' + 'operations like write or query, or as part of its resolvers, updaters, ' + 'or optimistic configs.' : "", 2);
   return currentDependencies;
-}, setNode = function(a, b, c, d) {
-  currentOptimisticKey ? (void 0 === a.optimistic[currentOptimisticKey] && (a.optimistic[currentOptimisticKey] = new Map, 
-  a.keys.unshift(currentOptimisticKey)), a = a.optimistic[currentOptimisticKey]) : a = a.base;
-  var e = a.get(b);
-  void 0 === e && a.set(b, e = makeDict());
-  void 0 !== d || currentOptimisticKey ? e[c] = d : delete e[c];
-}, getNode = function(a, b, c) {
-  for (var d = 0, e = a.keys.length; d < e; d++) {
-    var f = a.optimistic[a.keys[d]].get(b);
-    if (void 0 !== f && c in f) {
-      return f[c];
+};
+var make = function (queryRootKey) {
+  return {
+    persistenceScheduled: false,
+    persistenceBatch: makeDict(),
+    gcScheduled: false,
+    queryRootKey: queryRootKey,
+    gcBatch: new Set(),
+    refCount: makeDict(),
+    refLock: makeDict(),
+    links: makeNodeMap(),
+    records: makeNodeMap(),
+    storage: null
+  };
+};
+/** Adds a node value to a NodeMap (taking optimistic values into account */
+
+var setNode = function (map, entityKey, fieldKey, value) {
+  // Optimistic values are written to a map in the optimistic dict
+  // All other values are written to the base map
+  var keymap;
+
+  if (currentOptimisticKey) {
+    // If the optimistic map doesn't exist yet, it' created, and
+    // the optimistic key is stored (in order of priority)
+    if (map.optimistic[currentOptimisticKey] === undefined) {
+      map.optimistic[currentOptimisticKey] = new Map();
+      map.keys.unshift(currentOptimisticKey);
+    }
+
+    keymap = map.optimistic[currentOptimisticKey];
+  } else {
+    keymap = map.base;
+  } // On the map itself we get or create the entity as a dict
+
+
+  var entity = keymap.get(entityKey);
+
+  if (entity === undefined) {
+    keymap.set(entityKey, entity = makeDict());
+  } // If we're setting undefined we delete the node's entry
+  // On optimistic layers we actually set undefined so it can
+  // override the base value
+
+
+  if (value === undefined && !currentOptimisticKey) {
+    delete entity[fieldKey];
+  } else {
+    entity[fieldKey] = value;
+  }
+};
+/** Gets a node value from a NodeMap (taking optimistic values into account */
+
+
+var getNode = function (map, entityKey, fieldKey) {
+  // This first iterates over optimistic layers (in order)
+  for (var i = 0, l = map.keys.length; i < l; i++) {
+    var optimistic = map.optimistic[map.keys[i]];
+    var node$1 = optimistic.get(entityKey); // If the node and node value exists it is returned, including undefined
+
+    if (node$1 !== undefined && fieldKey in node$1) {
+      return node$1[fieldKey];
+    }
+  } // Otherwise we read the non-optimistic base value
+
+
+  var node = map.base.get(entityKey);
+  return node !== undefined ? node[fieldKey] : undefined;
+};
+/** Gets a node value from a NodeMap (taking optimistic values into account */
+
+
+var getNodeParent = function (map, entityKey, fieldKey) {
+  // This first iterates over optimistic layers (in order)
+  for (var i = 0, l = map.keys.length; i < l; i++) {
+    var optimistic = map.optimistic[map.keys[i]];
+    var node$1 = optimistic.get(entityKey); // If the node and node value exists it is returned, including undefined
+
+    if (node$1 !== undefined && fieldKey in node$1) {
+      return node$1;
+    }
+  } // Otherwise we read the non-optimistic base value
+
+
+  var node = map.base.get(entityKey);
+  return node !== undefined ? node : undefined;
+};
+/** Clears an optimistic layers from a NodeMap */
+
+
+var clearOptimisticNodes = function (map, optimisticKey) {
+  // Check whether the optimistic layer exists on the NodeMap
+  var index = map.keys.indexOf(optimisticKey);
+
+  if (index > -1) {
+    // Then delete it and splice out the optimisticKey
+    delete map.optimistic[optimisticKey];
+    map.keys.splice(index, 1);
+  }
+};
+/** Adjusts the reference count of an entity on a refCount dict by "by" and updates the gcBatch */
+
+
+var updateRCForEntity = function (gcBatch, refCount, entityKey, by) {
+  // Retrieve the reference count
+  var count = refCount[entityKey] !== undefined ? refCount[entityKey] : 0; // Adjust it by the "by" value
+
+  var newCount = refCount[entityKey] = count + by | 0; // Add it to the garbage collection batch if it needs to be deleted or remove it
+  // from the batch if it needs to be kept
+
+  if (gcBatch !== undefined) {
+    if (newCount <= 0) {
+      gcBatch.add(entityKey);
+    } else if (count <= 0 && newCount > 0) {
+      gcBatch.delete(entityKey);
     }
   }
-  return void 0 !== (a = a.base.get(b)) ? a[c] : void 0;
-}, clearOptimisticNodes = function(a, b) {
-  var c = a.keys.indexOf(b);
-  -1 < c && (delete a.optimistic[b], a.keys.splice(c, 1));
-}, updateRCForEntity = function(a, b, c, d) {
-  var e = void 0 !== b[c] ? b[c] : 0;
-  b = b[c] = e + d | 0;
-  void 0 !== a && (0 >= b ? a.add(c) : 0 >= e && 0 < b && a.delete(c));
-}, updateRCForLink = function(a, b, c, d) {
-  if ("string" == typeof c) {
-    updateRCForEntity(a, b, c, d);
-  } else if (Array.isArray(c)) {
-    for (var e = 0, f = c.length; e < f; e++) {
-      var g = c[e];
-      g && updateRCForEntity(a, b, g, d);
+};
+/** Adjusts the reference counts of all entities of a link on a refCount dict by "by" and updates the gcBatch */
+
+
+var updateRCForLink = function (gcBatch, refCount, link, by) {
+  if (typeof link === 'string') {
+    updateRCForEntity(gcBatch, refCount, link, by);
+  } else if (Array.isArray(link)) {
+    for (var i = 0, l = link.length; i < l; i++) {
+      var entityKey = link[i];
+
+      if (entityKey) {
+        updateRCForEntity(gcBatch, refCount, entityKey, by);
+      }
     }
   }
-}, extractNodeFields = function(a, b, c) {
-  if (void 0 !== c) {
-    for (var d in c) {
-      b.has(d) || (a.push(fieldInfoOfKey(d)), b.add(d));
+};
+/** Writes all parsed FieldInfo objects of a given node dict to a given array if it hasn't been seen */
+
+
+var extractNodeFields = function (fieldInfos, seenFieldKeys, node) {
+  if (node !== undefined) {
+    for (var fieldKey in node) {
+      if (!seenFieldKeys.has(fieldKey)) {
+        // If the node hasn't been seen the serialized fieldKey is turnt back into
+        // a rich FieldInfo object that also contains the field's name and arguments
+        fieldInfos.push(fieldInfoOfKey(fieldKey));
+        seenFieldKeys.add(fieldKey);
+      }
     }
   }
-}, extractNodeMapFields = function(a, b, c, d) {
-  extractNodeFields(a, b, d.base.get(c));
-  for (var e = 0, f = d.keys.length; e < f; e++) {
-    extractNodeFields(a, b, d.optimistic[d.keys[e]].get(c));
+};
+/** Writes all parsed FieldInfo objects of all nodes in a NodeMap to a given array */
+
+
+var extractNodeMapFields = function (fieldInfos, seenFieldKeys, entityKey, map) {
+  // Extracts FieldInfo for the entity in the base map
+  extractNodeFields(fieldInfos, seenFieldKeys, map.base.get(entityKey)); // Then extracts FieldInfo for the entity from the optimistic maps
+
+  for (var i = 0, l = map.keys.length; i < l; i++) {
+    var optimistic = map.optimistic[map.keys[i]];
+    extractNodeFields(fieldInfos, seenFieldKeys, optimistic.get(entityKey));
   }
-}, gc = function(a) {
-  a.gcScheduled = !1;
-  a.gcBatch.forEach((function(b) {
-    if (0 >= (a.refCount[b] || 0)) {
-      for (var c in a.refLock) {
-        var d = a.refLock[c];
-        if (0 < (d[b] || 0)) {
+};
+/** Garbage collects all entities that have been marked as having no references */
+
+
+var gc = function (data) {
+  // Reset gcScheduled flag
+  data.gcScheduled = false; // Iterate over all entities that have been marked for deletion
+  // Entities have been marked for deletion in `updateRCForEntity` if
+  // their reference count dropped to 0
+
+  data.gcBatch.forEach(function (entityKey) {
+    // Check first whether the reference count is still 0
+    var rc = data.refCount[entityKey] || 0;
+
+    if (rc <= 0) {
+      // Each optimistic layer may also still contain some references to marked entities
+      for (var optimisticKey in data.refLock) {
+        var refCount = data.refLock[optimisticKey];
+        var locks = refCount[entityKey] || 0; // If the optimistic layer has any references to the entity, don't GC it,
+        // otherwise delete the reference count from the optimistic layer
+
+        if (locks > 0) {
           return;
         }
-        delete d[b];
-      }
-      delete a.refCount[b];
-      a.gcBatch.delete(b);
-      if (void 0 !== (c = a.records.base.get(b)) && (a.records.base.delete(b), a.storage)) {
-        for (var e in c) {
-          c = prefixKey("r", joinKeys(b, e)), a.persistenceBatch[c] = void 0;
+
+        delete refCount[entityKey];
+      } // All conditions are met: The entity can be deleted
+      // Delete the reference count, and delete the entity from the GC batch
+
+
+      delete data.refCount[entityKey];
+      data.gcBatch.delete(entityKey); // Delete the record and for each of its fields, delete them on the persistence
+      // layer if one is present
+      // No optimistic data needs to be deleted, as the entity is not being referenced by
+      // anything and optimistic layers will eventually be deleted anyway
+
+      var recordsNode = data.records.base.get(entityKey);
+
+      if (recordsNode !== undefined) {
+        data.records.base.delete(entityKey);
+
+        if (data.storage) {
+          for (var fieldKey in recordsNode) {
+            var key = prefixKey('r', joinKeys(entityKey, fieldKey));
+            data.persistenceBatch[key] = undefined;
+          }
         }
-      }
-      if (void 0 !== (e = a.links.base.get(b))) {
-        a.links.base.delete(b);
-        for (var f in e) {
-          a.storage && (c = prefixKey("l", joinKeys(b, f)), a.persistenceBatch[c] = void 0), 
-          updateRCForLink(a.gcBatch, a.refCount, e[f], -1);
+      } // Delete all the entity's links, but also update the reference count
+      // for those links (which can lead to an unrolled recursive GC of the children)
+
+
+      var linkNode = data.links.base.get(entityKey);
+
+      if (linkNode !== undefined) {
+        data.links.base.delete(entityKey);
+
+        for (var fieldKey$1 in linkNode) {
+          // Delete all links from the persistence layer if one is present
+          if (data.storage) {
+            var key$1 = prefixKey('l', joinKeys(entityKey, fieldKey$1));
+            data.persistenceBatch[key$1] = undefined;
+          }
+
+          updateRCForLink(data.gcBatch, data.refCount, linkNode[fieldKey$1], -1);
         }
       }
     } else {
-      a.gcBatch.delete(b);
+      data.gcBatch.delete(entityKey);
     }
-  }));
-}, updateDependencies = function(a, b) {
-  "__typename" !== b && (a !== currentData.queryRootKey ? currentDependencies.add(a) : void 0 !== b && currentDependencies.add(joinKeys(a, b)));
-}, readRecord = function(a, b) {
-  updateDependencies(a, b);
-  return getNode(currentData.records, a, b);
-}, readLink = function(a, b) {
-  updateDependencies(a, b);
-  return getNode(currentData.links, a, b);
-}, writeRecord = function(a, b, c) {
-  updateDependencies(a, b);
-  setNode(currentData.records, a, b, c);
-  currentData.storage && !currentOptimisticKey && (a = prefixKey("r", joinKeys(a, b)), 
-  currentData.persistenceBatch[a] = c);
-}, writeLink = function(a, b, c) {
-  var d = currentData;
+  });
+};
+
+var updateDependencies = function (entityKey, fieldKey) {
+  if (fieldKey !== '__typename') {
+    if (entityKey !== currentData.queryRootKey) {
+      currentDependencies.add(entityKey);
+    } else if (fieldKey !== undefined) {
+      currentDependencies.add(joinKeys(entityKey, fieldKey));
+    }
+  }
+};
+/** Reads an entity's field (a "record") from data */
+
+
+var readRecord = function (entityKey, fieldKey) {
+  updateDependencies(entityKey, fieldKey);
+  return getNode(currentData.records, entityKey, fieldKey);
+};
+var readParent = function (entityKey, fieldKey) {
+  updateDependencies(entityKey, fieldKey);
+  return getNodeParent(currentData.records, entityKey, fieldKey);
+};
+/** Reads an entity's link from data */
+
+var readLink = function (entityKey, fieldKey) {
+  updateDependencies(entityKey, fieldKey);
+  return getNode(currentData.links, entityKey, fieldKey);
+};
+/** Writes an entity's field (a "record") to data */
+
+var writeRecord = function (entityKey, fieldKey, value) {
+  updateDependencies(entityKey, fieldKey);
+  setNode(currentData.records, entityKey, fieldKey, value);
+
+  if (currentData.storage && !currentOptimisticKey) {
+    var key = prefixKey('r', joinKeys(entityKey, fieldKey));
+    currentData.persistenceBatch[key] = value;
+  }
+};
+var hasField = function (entityKey, fieldKey) {
+  return readRecord(entityKey, fieldKey) !== undefined || readLink(entityKey, fieldKey) !== undefined;
+};
+/** Writes an entity's link to data */
+
+var writeLink = function (entityKey, fieldKey, link) {
+  var data = currentData; // Retrieve the reference counting dict or the optimistic reference locking dict
+
+  var refCount; // Retrive the link NodeMap from either an optimistic or the base layer
+
+  var links; // Set the GC batch if we're not optimistically updating
+
+  var gcBatch;
+
   if (currentOptimisticKey) {
-    var e = d.refLock[currentOptimisticKey] || (d.refLock[currentOptimisticKey] = makeDict());
-    var f = d.links.optimistic[currentOptimisticKey];
+    // The refLock counters are also reference counters, but they prevent
+    // garbage collection instead of being used to trigger it
+    refCount = data.refLock[currentOptimisticKey] || (data.refLock[currentOptimisticKey] = makeDict());
+    links = data.links.optimistic[currentOptimisticKey];
   } else {
-    d.storage && (e = prefixKey("l", joinKeys(a, b)), d.persistenceBatch[e] = c);
-    e = d.refCount;
-    f = d.links.base;
-    var g = d.gcBatch;
-  }
-  f = void 0 !== (f = void 0 !== f ? f.get(a) : void 0) ? f[b] : null;
-  updateDependencies(a, b);
-  setNode(d.links, a, b, c);
-  updateRCForLink(g, e, f, -1);
-  updateRCForLink(g, e, c, 1);
-}, hydrateData = function(a, b, c) {
-  initDataState(a, 0);
-  for (var d in c) {
-    var e = d.indexOf("."), f = d.slice(2, e);
-    e = d.slice(e + 1);
-    switch (d.charCodeAt(0)) {
-     case 108:
-      writeLink(f, e, c[d]);
-      break;
+    if (data.storage) {
+      var key = prefixKey('l', joinKeys(entityKey, fieldKey));
+      data.persistenceBatch[key] = link;
+    }
 
-     case 114:
-      writeRecord(f, e, c[d]);
+    refCount = data.refCount;
+    links = data.links.base;
+    gcBatch = data.gcBatch;
+  } // Retrieve the previous link for this field
+
+
+  var prevLinkNode = links !== undefined ? links.get(entityKey) : undefined;
+  var prevLink = prevLinkNode !== undefined ? prevLinkNode[fieldKey] : null; // Update dependencies
+
+  updateDependencies(entityKey, fieldKey); // Update the link
+
+  setNode(data.links, entityKey, fieldKey, link); // First decrease the reference count for the previous link
+
+  updateRCForLink(gcBatch, refCount, prevLink, -1); // Then increase the reference count for the new link
+
+  updateRCForLink(gcBatch, refCount, link, 1);
+};
+/** Removes an optimistic layer of links and records */
+
+var clearOptimistic = function (data, optimisticKey) {
+  // We also delete the optimistic reference locks
+  delete data.refLock[optimisticKey];
+  clearOptimisticNodes(data.records, optimisticKey);
+  clearOptimisticNodes(data.links, optimisticKey);
+};
+/** Return an array of FieldInfo (info on all the fields and their arguments) for a given entity */
+
+var inspectFields = function (entityKey) {
+  var links = currentData.links;
+  var records = currentData.records;
+  var fieldInfos = [];
+  var seenFieldKeys = new Set(); // Update dependencies
+
+  updateDependencies(entityKey); // Extract FieldInfos to the fieldInfos array for links and records
+  // This also deduplicates by keeping track of fieldKeys in the seenFieldKeys Set
+
+  extractNodeMapFields(fieldInfos, seenFieldKeys, entityKey, links);
+  extractNodeMapFields(fieldInfos, seenFieldKeys, entityKey, records);
+  return fieldInfos;
+};
+var hydrateData = function (data, storage, entries) {
+  initDataState(data, 0);
+
+  for (var key in entries) {
+    var dotIndex = key.indexOf('.');
+    var entityKey = key.slice(2, dotIndex);
+    var fieldKey = key.slice(dotIndex + 1);
+
+    switch (key.charCodeAt(0)) {
+      case 108:
+        writeLink(entityKey, fieldKey, entries[key]);
+        break;
+
+      case 114:
+        writeRecord(entityKey, fieldKey, entries[key]);
+        break;
     }
   }
+
   clearDataState();
-  a.storage = b;
-}, isFragmentHeuristicallyMatching = function(a, b, c, d) {
-  if (!b) {
-    return !1;
-  }
-  var e = getTypeCondition(a);
-  if (b === e) {
-    return !0;
-  }
-  "production" !== process.env.NODE_ENV && warn("Heuristic Fragment Matching: A fragment is trying to match against the `" + b + "` type, but the type condition is `" + e + "`. Since GraphQL allows for interfaces `" + e + "` may be aninterface.\nA schema needs to be defined for this match to be deterministic, otherwise the fragment will be matched heuristically!", 16);
-  return !getSelectionSet(a).some((function(a) {
-    if (!isFieldNode(a)) {
-      return !1;
-    }
-    a = keyOfField(getName(a), getFieldArguments(a, d.variables));
-    return !function(a, b) {
-      return void 0 !== readRecord(a, b) || void 0 !== readLink(a, b);
-    }(c, a);
-  }));
-}, SelectionIterator = function(a, b, c, d) {
-  this.typename = a;
-  this.entityKey = b;
-  this.context = d;
-  this.indexStack = [ 0 ];
-  this.selectionStack = [ c ];
+  data.storage = storage;
 };
 
-SelectionIterator.prototype.next = function() {
-  for (;0 !== this.indexStack.length; ) {
-    var a = this.indexStack[this.indexStack.length - 1]++, b = this.selectionStack[this.selectionStack.length - 1];
-    if (a >= b.length) {
-      this.indexStack.pop(), this.selectionStack.pop();
-    } else if (shouldInclude(a = b[a], this.context.variables)) {
-      if (isFieldNode(a)) {
-        if ("__typename" !== getName(a)) {
-          return a;
+var isFragmentHeuristicallyMatching = function (node, typename, entityKey, ctx) {
+  if (!typename) {
+    return false;
+  }
+
+  var typeCondition = getTypeCondition(node);
+
+  if (typename === typeCondition) {
+    return true;
+  }
+
+  process.env.NODE_ENV !== 'production' ? warn('Heuristic Fragment Matching: A fragment is trying to match against the `' + typename + '` type, ' + 'but the type condition is `' + typeCondition + '`. Since GraphQL allows for interfaces `' + typeCondition + '` may be an' + 'interface.\nA schema needs to be defined for this match to be deterministic, ' + 'otherwise the fragment will be matched heuristically!', 16) : void 0;
+  return !getSelectionSet(node).some(function (node) {
+    if (!isFieldNode(node)) {
+      return false;
+    }
+
+    var fieldKey = keyOfField(getName(node), getFieldArguments(node, ctx.variables));
+    return !hasField(entityKey, fieldKey);
+  });
+};
+
+var SelectionIterator = function SelectionIterator(typename, entityKey, select, ctx) {
+  this.typename = typename;
+  this.entityKey = entityKey;
+  this.context = ctx;
+  this.indexStack = [0];
+  this.selectionStack = [select];
+};
+
+SelectionIterator.prototype.next = function next() {
+  while (this.indexStack.length !== 0) {
+    var index = this.indexStack[this.indexStack.length - 1]++;
+    var select = this.selectionStack[this.selectionStack.length - 1];
+
+    if (index >= select.length) {
+      this.indexStack.pop();
+      this.selectionStack.pop();
+      continue;
+    } else {
+      var node = select[index];
+
+      if (!shouldInclude(node, this.context.variables)) {
+        continue;
+      } else if (!isFieldNode(node)) {
+        // A fragment is either referred to by FragmentSpread or inline
+        var fragmentNode = !isInlineFragment(node) ? this.context.fragments[getName(node)] : node;
+
+        if (fragmentNode !== undefined) {
+          if (process.env.NODE_ENV !== 'production') {
+            pushDebugNode(this.typename, fragmentNode);
+          }
+
+          var isMatching = this.context.schemaPredicates !== undefined ? this.context.schemaPredicates.isInterfaceOfType(getTypeCondition(fragmentNode), this.typename) : isFragmentHeuristicallyMatching(fragmentNode, this.typename, this.entityKey, this.context);
+
+          if (isMatching) {
+            this.indexStack.push(0);
+            this.selectionStack.push(getSelectionSet(fragmentNode));
+          }
         }
-      } else if (void 0 !== (a = isInlineFragment(a) ? a : this.context.fragments[getName(a)]) && ("production" !== process.env.NODE_ENV && pushDebugNode(this.typename, a), 
-      void 0 !== this.context.schemaPredicates ? this.context.schemaPredicates.isInterfaceOfType(getTypeCondition(a), this.typename) : isFragmentHeuristicallyMatching(a, this.typename, this.entityKey, this.context))) {
-        this.indexStack.push(0), this.selectionStack.push(getSelectionSet(a));
+
+        continue;
+      } else if (getName(node) === '__typename') {
+        continue;
+      } else {
+        return node;
       }
     }
   }
+
+  return undefined;
 };
 
-var ensureData = function(a) {
-  return void 0 === a ? null : a;
-}, write = function(a, b, c) {
-  initDataState(a.data, 0);
-  a = startWrite(a, b, c);
+var ensureData = function (x) {
+  return x === undefined ? null : x;
+};
+
+/** Writes a request given its response to the store */
+
+var write = function (store, request, data) {
+  initDataState(store.data, 0);
+  var result = startWrite(store, request, data);
   clearDataState();
-  return a;
-}, startWrite = function(a, b, c) {
-  var d = getMainOperation(b.query), e = {
-    dependencies: getCurrentDependencies()
-  }, f = getSelectionSet(d), g = a.getRootKey(d.operation);
-  a = {
-    parentTypeName: g,
-    parentKey: g,
-    parentFieldKey: "",
-    fieldName: "",
-    variables: normalizeVariables(d, b.variables),
-    fragments: getFragments(b.query),
-    result: e,
-    store: a,
-    schemaPredicates: a.schemaPredicates
-  };
-  "production" !== process.env.NODE_ENV && pushDebugNode(g, d);
-  g === a.store.getRootKey("query") ? writeSelection(a, g, f, c) : writeRoot(a, g, f, c);
-  return e;
-}, writeOptimistic = function(a, b, c) {
-  initDataState(a.data, c);
-  var d = getMainOperation(b.query);
-  c = {
+  return result;
+};
+var startWrite = function (store, request, data) {
+  var operation = getMainOperation(request.query);
+  var result = {
     dependencies: getCurrentDependencies()
   };
-  var e = a.getRootKey("mutation"), f = a.getRootKey(d.operation);
-  invariant(f === e, "production" !== process.env.NODE_ENV ? "writeOptimistic(...) was called with an operation that is not a mutation.\nThis case is unsupported and should never occur." : "", 10);
-  "production" !== process.env.NODE_ENV && pushDebugNode(f, d);
-  a = {
-    parentTypeName: e,
-    parentKey: e,
-    parentFieldKey: "",
-    fieldName: "",
-    variables: normalizeVariables(d, b.variables),
-    fragments: getFragments(b.query),
-    result: c,
-    store: a,
-    schemaPredicates: a.schemaPredicates,
-    optimistic: !0
+  var select = getSelectionSet(operation);
+  var operationName = store.getRootKey(operation.operation);
+  var ctx = {
+    parentTypeName: operationName,
+    parentKey: operationName,
+    parentFieldKey: '',
+    fieldName: '',
+    variables: normalizeVariables(operation, request.variables),
+    fragments: getFragments(request.query),
+    result: result,
+    store: store,
+    schemaPredicates: store.schemaPredicates
   };
-  b = makeDict();
-  d = new SelectionIterator(f, f, getSelectionSet(d), a);
-  for (var g; void 0 !== (g = d.next()); ) {
-    if (void 0 !== g.selectionSet) {
-      var h = getName(g), k = a.store.optimisticMutations[h];
-      if (void 0 !== k) {
-        a.fieldName = h;
-        k = k((f = getFieldArguments(g, a.variables)) || makeDict(), a.store, a);
-        var m = ensureData(k);
-        writeRootField(a, m, getSelectionSet(g));
-        b[h] = k;
-        void 0 !== (g = a.store.updates[e][h]) && g(b, f || makeDict(), a.store, a);
+
+  if (process.env.NODE_ENV !== 'production') {
+    pushDebugNode(operationName, operation);
+  }
+
+  if (operationName === ctx.store.getRootKey('query')) {
+    writeSelection(ctx, operationName, select, data);
+  } else {
+    writeRoot(ctx, operationName, select, data);
+  }
+
+  return result;
+};
+var writeOptimistic = function (store, request, optimisticKey) {
+  initDataState(store.data, optimisticKey);
+  var operation = getMainOperation(request.query);
+  var result = {
+    dependencies: getCurrentDependencies()
+  };
+  var mutationRootKey = store.getRootKey('mutation');
+  var operationName = store.getRootKey(operation.operation);
+  invariant(operationName === mutationRootKey, process.env.NODE_ENV !== "production" ? 'writeOptimistic(...) was called with an operation that is not a mutation.\n' + 'This case is unsupported and should never occur.' : "", 10);
+
+  if (process.env.NODE_ENV !== 'production') {
+    pushDebugNode(operationName, operation);
+  }
+
+  var ctx = {
+    parentTypeName: mutationRootKey,
+    parentKey: mutationRootKey,
+    parentFieldKey: '',
+    fieldName: '',
+    variables: normalizeVariables(operation, request.variables),
+    fragments: getFragments(request.query),
+    result: result,
+    store: store,
+    schemaPredicates: store.schemaPredicates,
+    optimistic: true
+  };
+  var data = makeDict();
+  var iter = new SelectionIterator(operationName, operationName, getSelectionSet(operation), ctx);
+  var node;
+
+  while ((node = iter.next()) !== undefined) {
+    if (node.selectionSet !== undefined) {
+      var fieldName = getName(node);
+      var resolver = ctx.store.optimisticMutations[fieldName];
+
+      if (resolver !== undefined) {
+        // We have to update the context to reflect up-to-date ResolveInfo
+        ctx.fieldName = fieldName;
+        var fieldArgs = getFieldArguments(node, ctx.variables);
+        var resolverValue = resolver(fieldArgs || makeDict(), ctx.store, ctx);
+        var resolverData = ensureData(resolverValue);
+        writeRootField(ctx, resolverData, getSelectionSet(node));
+        data[fieldName] = resolverValue;
+        var updater = ctx.store.updates[mutationRootKey][fieldName];
+
+        if (updater !== undefined) {
+          updater(data, fieldArgs || makeDict(), ctx.store, ctx);
+        }
       }
     }
   }
+
   clearDataState();
-  return c;
-}, writeFragment = function(a, b, c, d) {
-  b = getFragments(b);
-  var e = Object.keys(b);
-  if (void 0 === (e = b[e[0]])) {
-    return "production" !== process.env.NODE_ENV ? warn("writeFragment(...) was called with an empty fragment.\nYou have to call it with at least one fragment in your GraphQL document.", 11) : void 0;
+  return result;
+};
+var writeFragment = function (store, query, data, variables) {
+  var fragments = getFragments(query);
+  var names = Object.keys(fragments);
+  var fragment = fragments[names[0]];
+
+  if (fragment === undefined) {
+    return process.env.NODE_ENV !== 'production' ? warn('writeFragment(...) was called with an empty fragment.\n' + 'You have to call it with at least one fragment in your GraphQL document.', 11) : void 0;
   }
-  var f = getFragmentTypeName(e);
-  c = _extends({
-    __typename: f
-  }, c);
-  var g = a.keyOfEntity(c);
-  if (!g) {
-    return "production" !== process.env.NODE_ENV ? warn("Can't generate a key for writeFragment(...) data.\nYou have to pass an `id` or `_id` field or create a custom `keys` config for `" + f + "`.", 12) : void 0;
+
+  var typename = getFragmentTypeName(fragment);
+
+  var writeData = _extends({
+    __typename: typename
+  }, data);
+
+  var entityKey = store.keyOfEntity(writeData);
+
+  if (!entityKey) {
+    return process.env.NODE_ENV !== 'production' ? warn("Can't generate a key for writeFragment(...) data.\n" + 'You have to pass an `id` or `_id` field or create a custom `keys` config for `' + typename + '`.', 12) : void 0;
   }
-  "production" !== process.env.NODE_ENV && pushDebugNode(f, e);
-  a = {
-    parentTypeName: f,
-    parentKey: g,
-    parentFieldKey: "",
-    fieldName: "",
-    variables: d || {},
-    fragments: b,
+
+  if (process.env.NODE_ENV !== 'production') {
+    pushDebugNode(typename, fragment);
+  }
+
+  var ctx = {
+    parentTypeName: typename,
+    parentKey: entityKey,
+    parentFieldKey: '',
+    fieldName: '',
+    variables: variables || {},
+    fragments: fragments,
     result: {
       dependencies: getCurrentDependencies()
     },
-    store: a,
-    schemaPredicates: a.schemaPredicates
+    store: store,
+    schemaPredicates: store.schemaPredicates
   };
-  writeSelection(a, g, getSelectionSet(e), c);
-}, writeSelection = function(a, b, c, d) {
-  var e = b === a.store.getRootKey("query") ? b : d.__typename;
-  if ("string" == typeof e) {
-    writeRecord(b, "__typename", e);
-    c = new SelectionIterator(e, b, c, a);
-    for (var f; void 0 !== (f = c.next()); ) {
-      var g = getName(f), h = getFieldArguments(f, a.variables);
-      h = keyOfField(g, h);
-      var k = d[getFieldAlias(f)], m = joinKeys(b, h);
-      if ("production" !== process.env.NODE_ENV) {
-        if (void 0 === k) {
-          g = a.optimistic ? "\nYour optimistic result may be missing a field!" : "";
-          f = void 0 === f.selectionSet ? "scalar (number, boolean, etc)" : "selection set";
-          "production" !== process.env.NODE_ENV && warn("Invalid undefined: The field at `" + h + "` is `undefined`, but the GraphQL query expects a " + f + " for this field." + g, 13);
-          continue;
-        } else {
-          a.schemaPredicates && e && a.schemaPredicates.isFieldAvailableOnType(e, g);
-        }
+  writeSelection(ctx, entityKey, getSelectionSet(fragment), writeData);
+};
+
+var writeSelection = function (ctx, entityKey, select, data) {
+  var isQuery = entityKey === ctx.store.getRootKey('query');
+  var typename = isQuery ? entityKey : data.__typename;
+
+  if (typeof typename !== 'string') {
+    return;
+  }
+
+  writeRecord(entityKey, '__typename', typename);
+  var iter = new SelectionIterator(typename, entityKey, select, ctx);
+  var node;
+
+  while ((node = iter.next()) !== undefined) {
+    var fieldName = getName(node);
+    var fieldArgs = getFieldArguments(node, ctx.variables);
+    var fieldKey = keyOfField(fieldName, fieldArgs);
+    var fieldValue = data[getFieldAlias(node)];
+    var key = joinKeys(entityKey, fieldKey);
+
+    if (process.env.NODE_ENV !== 'production') {
+      if (fieldValue === undefined) {
+        var advice = ctx.optimistic ? '\nYour optimistic result may be missing a field!' : '';
+        var expected = node.selectionSet === undefined ? 'scalar (number, boolean, etc)' : 'selection set';
+        process.env.NODE_ENV !== 'production' ? warn('Invalid undefined: The field at `' + fieldKey + '` is `undefined`, but the GraphQL query expects a ' + expected + ' for this field.' + advice, 13) : void 0;
+        continue; // Skip this field
+      } else if (ctx.schemaPredicates && typename) {
+        ctx.schemaPredicates.isFieldAvailableOnType(typename, fieldName);
       }
-      void 0 === f.selectionSet ? writeRecord(b, h, k) : (g = ensureData(k), f = writeField(a, m, getSelectionSet(f), g), 
-      writeLink(b, h, f));
     }
-  }
-}, writeField = function(a, b, c, d) {
-  if (Array.isArray(d)) {
-    for (var e = Array(d.length), f = 0, g = d.length; f < g; f++) {
-      var h = d[f], k = joinKeys(b, "" + f);
-      h = writeField(a, k, c, h);
-      e[f] = h;
-    }
-    return e;
-  }
-  if (null === d) {
-    return null;
-  }
-  f = null !== (e = a.store.keyOfEntity(d)) ? e : b;
-  g = d.__typename;
-  void 0 !== a.store.keys[d.__typename] || null !== e || "string" != typeof g || g.endsWith("Connection") || g.endsWith("Edge") || "PageInfo" === g || "production" !== process.env.NODE_ENV && warn("Invalid key: The GraphQL query at the field at `" + b + "` has a selection set, but no key could be generated for the data at this field.\nYou have to request `id` or `_id` fields for all selection sets or create a custom `keys` config for `" + g + "`.\nEntities without keys will be embedded directly on the parent entity. If this is intentional, create a `keys` config for `" + g + "` that always returns null.", 15);
-  writeSelection(a, f, c, d);
-  return f;
-}, writeRoot = function(a, b, c, d) {
-  var e = b === a.store.getRootKey("mutation") || b === a.store.getRootKey("subscription");
-  c = new SelectionIterator(b, b, c, a);
-  for (var f; void 0 !== (f = c.next()); ) {
-    var g = getName(f), h = getFieldArguments(f, a.variables), k = joinKeys(b, keyOfField(g, h));
-    if (void 0 !== f.selectionSet) {
-      var m = ensureData(d[getFieldAlias(f)]);
-      writeRootField(a, m, getSelectionSet(f));
-    }
-    e && (a.parentTypeName = b, a.parentKey = b, a.parentFieldKey = k, a.fieldName = g, 
-    void 0 !== (f = a.store.updates[b][g]) && f(d, h || makeDict(), a.store, a));
-  }
-}, writeRootField = function(a, b, c) {
-  if (Array.isArray(b)) {
-    for (var d = Array(b.length), e = 0, f = b.length; e < f; e++) {
-      d[e] = writeRootField(a, b[e], c);
-    }
-    return d;
-  }
-  null !== b && (null !== (d = a.store.keyOfEntity(b)) ? writeSelection(a, d, c, b) : writeRoot(a, b.__typename, c, b));
-}, invalidateSelection = function(a, b, c) {
-  if ("Query" !== b) {
-    var d = readRecord(b, "__typename");
-    if ("string" != typeof d) {
-      return;
-    }
-    writeRecord(b, "__typename", void 0);
-  } else {
-    d = b;
-  }
-  c = new SelectionIterator(d, b, c, a);
-  for (var e; void 0 !== (e = c.next()); ) {
-    var f = getName(e), g = keyOfField(f, getFieldArguments(e, a.variables));
-    "production" !== process.env.NODE_ENV && a.schemaPredicates && d && a.schemaPredicates.isFieldAvailableOnType(d, f);
-    if (void 0 === e.selectionSet) {
-      writeRecord(b, g, void 0);
-    } else if (e = getSelectionSet(e), f = readLink(b, g), writeLink(b, g, void 0), 
-    writeRecord(b, g, void 0), Array.isArray(f)) {
-      g = 0;
-      for (var h = f.length; g < h; g++) {
-        var k = f[g];
-        null !== k && invalidateSelection(a, k, e);
-      }
+
+    if (node.selectionSet === undefined) {
+      // This is a leaf node, so we're setting the field's value directly
+      writeRecord(entityKey, fieldKey, fieldValue);
     } else {
-      f && invalidateSelection(a, f, e);
+      // Process the field and write links for the child entities that have been written
+      var fieldData = ensureData(fieldValue);
+      var link = writeField(ctx, key, getSelectionSet(node), fieldData);
+      writeLink(entityKey, fieldKey, link);
     }
   }
-}, Store = function(a, b, c, d, e) {
-  var g, f = this;
-  this.gcScheduled = !1;
-  this.gc = function() {
-    gc(f.data);
-    f.gcScheduled = !1;
+};
+
+var writeField = function (ctx, parentFieldKey, select, data) {
+  if (Array.isArray(data)) {
+    var newData = new Array(data.length);
+
+    for (var i = 0, l = data.length; i < l; i++) {
+      var item = data[i]; // Append the current index to the parentFieldKey fallback
+
+      var indexKey = joinKeys(parentFieldKey, "" + i); // Recursively write array data
+
+      var links = writeField(ctx, indexKey, select, item); // Link cannot be expressed as a recursive type
+
+      newData[i] = links;
+    }
+
+    return newData;
+  } else if (data === null) {
+    return null;
+  }
+
+  var entityKey = ctx.store.keyOfEntity(data);
+  var key = entityKey !== null ? entityKey : parentFieldKey;
+  var typename = data.__typename;
+
+  if (ctx.store.keys[data.__typename] === undefined && entityKey === null && typeof typename === 'string' && !typename.endsWith('Connection') && !typename.endsWith('Edge') && typename !== 'PageInfo') {
+    process.env.NODE_ENV !== 'production' ? warn('Invalid key: The GraphQL query at the field at `' + parentFieldKey + '` has a selection set, ' + 'but no key could be generated for the data at this field.\n' + 'You have to request `id` or `_id` fields for all selection sets or create ' + 'a custom `keys` config for `' + typename + '`.\n' + 'Entities without keys will be embedded directly on the parent entity. ' + 'If this is intentional, create a `keys` config for `' + typename + '` that always returns null.', 15) : void 0;
+  }
+
+  writeSelection(ctx, key, select, data);
+  return key;
+}; // This is like writeSelection but assumes no parent entity exists
+
+
+var writeRoot = function (ctx, typename, select, data) {
+  var isRootField = typename === ctx.store.getRootKey('mutation') || typename === ctx.store.getRootKey('subscription');
+  var iter = new SelectionIterator(typename, typename, select, ctx);
+  var node;
+
+  while ((node = iter.next()) !== undefined) {
+    var fieldName = getName(node);
+    var fieldArgs = getFieldArguments(node, ctx.variables);
+    var fieldKey = joinKeys(typename, keyOfField(fieldName, fieldArgs));
+
+    if (node.selectionSet !== undefined) {
+      var fieldValue = ensureData(data[getFieldAlias(node)]);
+      writeRootField(ctx, fieldValue, getSelectionSet(node));
+    }
+
+    if (isRootField) {
+      // We have to update the context to reflect up-to-date ResolveInfo
+      ctx.parentTypeName = typename;
+      ctx.parentKey = typename;
+      ctx.parentFieldKey = fieldKey;
+      ctx.fieldName = fieldName; // We run side-effect updates after the default, normalized updates
+      // so that the data is already available in-store if necessary
+
+      var updater = ctx.store.updates[typename][fieldName];
+
+      if (updater !== undefined) {
+        updater(data, fieldArgs || makeDict(), ctx.store, ctx);
+      }
+    }
+  }
+}; // This is like writeField but doesn't fall back to a generated key
+
+
+var writeRootField = function (ctx, data, select) {
+  if (Array.isArray(data)) {
+    var newData = new Array(data.length);
+
+    for (var i = 0, l = data.length; i < l; i++) {
+      newData[i] = writeRootField(ctx, data[i], select);
+    }
+
+    return newData;
+  } else if (data === null) {
+    return;
+  } // Write entity to key that falls back to the given parentFieldKey
+
+
+  var entityKey = ctx.store.keyOfEntity(data);
+
+  if (entityKey !== null) {
+    writeSelection(ctx, entityKey, select, data);
+  } else {
+    var typename = data.__typename;
+    writeRoot(ctx, typename, select, data);
+  }
+};
+
+var invalidate = function (store, request) {
+  var operation = getMainOperation(request.query);
+  var ctx = {
+    variables: normalizeVariables(operation, request.variables),
+    fragments: getFragments(request.query),
+    store: store,
+    schemaPredicates: store.schemaPredicates
   };
+  invalidateSelection(ctx, ctx.store.getRootKey('query'), getSelectionSet(operation));
+};
+var invalidateSelection = function (ctx, entityKey, select) {
+  var isQuery = entityKey === 'Query';
+  var typename;
+
+  if (!isQuery) {
+    typename = readRecord(entityKey, '__typename');
+
+    if (typeof typename !== 'string') {
+      return;
+    } else {
+      writeRecord(entityKey, '__typename', undefined);
+    }
+  } else {
+    typename = entityKey;
+  }
+
+  var iter = new SelectionIterator(typename, entityKey, select, ctx);
+  var node;
+
+  while ((node = iter.next()) !== undefined) {
+    var fieldName = getName(node);
+    var fieldKey = keyOfField(fieldName, getFieldArguments(node, ctx.variables));
+
+    if (process.env.NODE_ENV !== 'production' && ctx.schemaPredicates && typename) {
+      ctx.schemaPredicates.isFieldAvailableOnType(typename, fieldName);
+    }
+
+    if (node.selectionSet === undefined) {
+      writeRecord(entityKey, fieldKey, undefined);
+    } else {
+      var fieldSelect = getSelectionSet(node);
+      var link = readLink(entityKey, fieldKey);
+      writeLink(entityKey, fieldKey, undefined);
+      writeRecord(entityKey, fieldKey, undefined);
+
+      if (Array.isArray(link)) {
+        for (var i = 0, l = link.length; i < l; i++) {
+          var childLink = link[i];
+
+          if (childLink !== null) {
+            invalidateSelection(ctx, childLink, fieldSelect);
+          }
+        }
+      } else if (link) {
+        invalidateSelection(ctx, link, fieldSelect);
+      }
+    }
+  }
+};
+
+var Store = function Store(schemaPredicates, resolvers, updates, optimisticMutations, keys) {
+  var this$1 = this;
+  var obj;
+  this.gcScheduled = false;
+
+  this.gc = function () {
+    gc(this$1.data);
+    this$1.gcScheduled = false;
+  };
+
   this.keyOfField = keyOfField;
-  this.resolvers = b || {};
-  this.optimisticMutations = d || {};
-  this.keys = e || {};
-  this.schemaPredicates = a;
+  this.resolvers = resolvers || {};
+  this.optimisticMutations = optimisticMutations || {};
+  this.keys = keys || {};
+  this.schemaPredicates = schemaPredicates;
   this.updates = {
-    Mutation: c && c.Mutation || {},
-    Subscription: c && c.Subscription || {}
+    Mutation: updates && updates.Mutation || {},
+    Subscription: updates && updates.Subscription || {}
   };
-  a ? (c = (b = a.schema).getQueryType(), a = b.getMutationType(), b = b.getSubscriptionType(), 
-  this.rootFields = {
-    query: c = c ? c.name : "Query",
-    mutation: a = a ? a.name : "Mutation",
-    subscription: b = b ? b.name : "Subscription"
-  }, this.rootNames = ((g = {})[c] = "query", g[a] = "mutation", g[b] = "subscription", 
-  g)) : (this.rootFields = {
-    query: "Query",
-    mutation: "Mutation",
-    subscription: "Subscription"
-  }, this.rootNames = {
-    Query: "query",
-    Mutation: "mutation",
-    Subscription: "subscription"
-  });
-  this.data = function(a) {
-    return {
-      persistenceScheduled: !1,
-      persistenceBatch: makeDict(),
-      gcScheduled: !1,
-      queryRootKey: a,
-      gcBatch: new Set,
-      refCount: makeDict(),
-      refLock: makeDict(),
-      links: makeNodeMap(),
-      records: makeNodeMap(),
-      storage: null
+
+  if (schemaPredicates) {
+    var schema = schemaPredicates.schema;
+    var queryType = schema.getQueryType();
+    var mutationType = schema.getMutationType();
+    var subscriptionType = schema.getSubscriptionType();
+    var queryName = queryType ? queryType.name : 'Query';
+    var mutationName = mutationType ? mutationType.name : 'Mutation';
+    var subscriptionName = subscriptionType ? subscriptionType.name : 'Subscription';
+    this.rootFields = {
+      query: queryName,
+      mutation: mutationName,
+      subscription: subscriptionName
     };
-  }(this.getRootKey("query"));
-};
-
-Store.prototype.getRootKey = function(a) {
-  return this.rootFields[a];
-};
-
-Store.prototype.keyOfEntity = function(a) {
-  var b = a.__typename, c = a.id, d = a._id;
-  if (!b) {
-    return null;
-  }
-  if (void 0 !== this.rootNames[b]) {
-    return b;
-  }
-  var e;
-  this.keys[b] ? e = this.keys[b](a) : null != c ? e = "" + c : null != d && (e = "" + d);
-  return e ? b + ":" + e : null;
-};
-
-Store.prototype.resolveFieldByKey = function(a, b) {
-  if (null === (a = null !== a && "string" != typeof a ? this.keyOfEntity(a) : a)) {
-    return null;
-  }
-  var c = readRecord(a, b);
-  return void 0 !== c ? c : (b = readLink(a, b)) ? b : null;
-};
-
-Store.prototype.resolve = function(a, b, c) {
-  return this.resolveFieldByKey(a, keyOfField(b, c));
-};
-
-Store.prototype.invalidateQuery = function(a, b) {
-  !function(a, b) {
-    var c = getMainOperation(b.query);
-    a = {
-      variables: normalizeVariables(c, b.variables),
-      fragments: getFragments(b.query),
-      store: a,
-      schemaPredicates: a.schemaPredicates
+    this.rootNames = (obj = {}, obj[queryName] = 'query', obj[mutationName] = 'mutation', obj[subscriptionName] = 'subscription', obj);
+  } else {
+    this.rootFields = {
+      query: 'Query',
+      mutation: 'Mutation',
+      subscription: 'Subscription'
     };
-    invalidateSelection(a, a.store.getRootKey("query"), getSelectionSet(c));
-  }(this, core.createRequest(a, b));
+    this.rootNames = {
+      Query: 'query',
+      Mutation: 'mutation',
+      Subscription: 'subscription'
+    };
+  }
+
+  this.data = make(this.getRootKey('query'));
 };
 
-Store.prototype.inspectFields = function(a) {
-  return null !== (a = null !== a && "string" != typeof a ? this.keyOfEntity(a) : a) ? function(a) {
-    var b = currentData.links, c = currentData.records, d = [], e = new Set;
-    updateDependencies(a);
-    extractNodeMapFields(d, e, a, b);
-    extractNodeMapFields(d, e, a, c);
-    return d;
-  }(a) : [];
+Store.prototype.getRootKey = function getRootKey(name) {
+  return this.rootFields[name];
 };
 
-Store.prototype.updateQuery = function(a, b) {
-  a = core.createRequest(a.query, a.variables);
-  null !== (b = b(this.readQuery(a))) && startWrite(this, a, b);
+Store.prototype.keyOfEntity = function keyOfEntity(data) {
+  var typename = data.__typename;
+  var id = data.id;
+  var _id = data._id;
+
+  if (!typename) {
+    return null;
+  } else if (this.rootNames[typename] !== undefined) {
+    return typename;
+  }
+
+  var key;
+
+  if (this.keys[typename]) {
+    key = this.keys[typename](data);
+  } else if (id !== undefined && id !== null) {
+    key = "" + id;
+  } else if (_id !== undefined && _id !== null) {
+    key = "" + _id;
+  }
+
+  return key ? typename + ":" + key : null;
 };
 
-Store.prototype.readQuery = function(a) {
-  return read(this, core.createRequest(a.query, a.variables)).data;
-};
+Store.prototype.resolveFieldByKey = function resolveFieldByKey(entity, fieldKey) {
+  var entityKey = entity !== null && typeof entity !== 'string' ? this.keyOfEntity(entity) : entity;
 
-Store.prototype.readFragment = function(a, b, c) {
-  return readFragment(this, a, b, c);
-};
-
-Store.prototype.writeFragment = function(a, b, c) {
-  writeFragment(this, a, b, c);
-};
-
-var getFieldArguments = function(a, b) {
-  if (void 0 === a.arguments || 0 === a.arguments.length) {
+  if (entityKey === null) {
     return null;
   }
-  for (var c = makeDict(), d = 0, e = 0, f = a.arguments.length; e < f; e++) {
-    var g = a.arguments[e], h = graphql.valueFromASTUntyped(g.value, b);
-    null != h && (c[getName(g)] = h, d++);
+
+  var fieldValue = readRecord(entityKey, fieldKey);
+
+  if (fieldValue !== undefined) {
+    return fieldValue;
   }
-  return 0 < d ? c : null;
-}, normalizeVariables = function(a, b) {
-  if (void 0 === a.variableDefinitions) {
+
+  var link = readLink(entityKey, fieldKey);
+  return link ? link : null;
+};
+
+Store.prototype.resolve = function resolve(entity, field, args) {
+  return this.resolveFieldByKey(entity, keyOfField(field, args));
+};
+
+Store.prototype.invalidateQuery = function invalidateQuery(query, variables) {
+  invalidate(this, core.createRequest(query, variables));
+};
+
+Store.prototype.inspectFields = function inspectFields$1(entity) {
+  var entityKey = entity !== null && typeof entity !== 'string' ? this.keyOfEntity(entity) : entity;
+  return entityKey !== null ? inspectFields(entityKey) : [];
+};
+
+Store.prototype.updateQuery = function updateQuery(input, updater) {
+  var request = core.createRequest(input.query, input.variables);
+  var output = updater(this.readQuery(request));
+
+  if (output !== null) {
+    startWrite(this, request, output);
+  }
+};
+
+Store.prototype.readQuery = function readQuery(input) {
+  return read(this, core.createRequest(input.query, input.variables)).data;
+};
+
+Store.prototype.readFragment = function readFragment$1(dataFragment, entity, variables) {
+  return readFragment(this, dataFragment, entity, variables);
+};
+
+Store.prototype.writeFragment = function writeFragment$1(dataFragment, data, variables) {
+  writeFragment(this, dataFragment, data, variables);
+};
+
+/** Evaluates a fields arguments taking vars into account */
+
+var getFieldArguments = function (node, vars) {
+  if (node.arguments === undefined || node.arguments.length === 0) {
+    return null;
+  }
+
+  var args = makeDict();
+  var argsSize = 0;
+
+  for (var i = 0, l = node.arguments.length; i < l; i++) {
+    var arg = node.arguments[i];
+    var value = graphql.valueFromASTUntyped(arg.value, vars);
+
+    if (value !== undefined && value !== null) {
+      args[getName(arg)] = value;
+      argsSize++;
+    }
+  }
+
+  return argsSize > 0 ? args : null;
+};
+/** Returns a normalized form of variables with defaulted values */
+
+var normalizeVariables = function (node, input) {
+  if (node.variableDefinitions === undefined) {
     return {};
   }
-  var c = b || {};
-  return a.variableDefinitions.reduce((function(a, b) {
-    var d = getName(b.variable), e = c[d];
-    if (void 0 === e) {
-      if (void 0 !== b.defaultValue) {
-        e = graphql.valueFromASTUntyped(b.defaultValue, c);
+
+  var args = input || {};
+  return node.variableDefinitions.reduce(function (vars, def) {
+    var name = getName(def.variable);
+    var value = args[name];
+
+    if (value === undefined) {
+      if (def.defaultValue !== undefined) {
+        value = graphql.valueFromASTUntyped(def.defaultValue, args);
       } else {
-        return a;
+        return vars;
       }
     }
-    a[d] = e;
-    return a;
-  }), makeDict());
-}, SchemaPredicates = function(a) {
-  this.schema = graphql.buildClientSchema(a);
+
+    vars[name] = value;
+    return vars;
+  }, makeDict());
 };
 
-SchemaPredicates.prototype.isFieldNullable = function(a, b) {
-  return void 0 === (a = getField(this.schema, a, b)) ? !1 : graphql.isNullableType(a.type);
+var SchemaPredicates = function SchemaPredicates(schema) {
+  this.schema = graphql.buildClientSchema(schema);
 };
 
-SchemaPredicates.prototype.isListNullable = function(a, b) {
-  if (void 0 === (a = getField(this.schema, a, b))) {
-    return !1;
+SchemaPredicates.prototype.isFieldNullable = function isFieldNullable(typename, fieldName) {
+  var field = getField(this.schema, typename, fieldName);
+
+  if (field === undefined) {
+    return false;
   }
-  a = graphql.isNonNullType(a.type) ? a.type.ofType : a.type;
-  return graphql.isListType(a) && graphql.isNullableType(a.ofType);
+
+  return graphql.isNullableType(field.type);
 };
 
-SchemaPredicates.prototype.isFieldAvailableOnType = function(a, b) {
-  return !!getField(this.schema, a, b);
+SchemaPredicates.prototype.isListNullable = function isListNullable(typename, fieldName) {
+  var field = getField(this.schema, typename, fieldName);
+
+  if (field === undefined) {
+    return false;
+  }
+
+  var ofType = graphql.isNonNullType(field.type) ? field.type.ofType : field.type;
+  return graphql.isListType(ofType) && graphql.isNullableType(ofType.ofType);
 };
 
-SchemaPredicates.prototype.isInterfaceOfType = function(a, b) {
-  if (!b || !a) {
-    return !1;
-  }
-  if (b === a) {
-    return !0;
-  }
-  var c = this.schema.getType(a), d = this.schema.getType(b);
-  if (c instanceof graphql.GraphQLObjectType) {
-    return c === d;
-  }
-  !function expectAbstractType(a, b) {
-    invariant(a instanceof graphql.GraphQLInterfaceType || a instanceof graphql.GraphQLUnionType, "production" !== process.env.NODE_ENV ? "Invalid Abstract type: The type `" + b + "` is not an Interface or Union type in the defined schema, but a fragment in the GraphQL document is using it as a type condition." : "", 5);
-  }(c, a);
-  expectObjectType(d, b);
-  return this.schema.isPossibleType(c, d);
+SchemaPredicates.prototype.isFieldAvailableOnType = function isFieldAvailableOnType(typename, fieldname) {
+  return !!getField(this.schema, typename, fieldname);
 };
 
-var getField = function(a, b, c) {
-  expectObjectType(a = a.getType(b), b);
-  if (void 0 === (a = a.getFields()[c])) {
-    "production" !== process.env.NODE_ENV && warn("Invalid field: The field `" + c + "` does not exist on `" + b + "`, but the GraphQL document expects it to exist.\nTraversal will continue, however this may lead to undefined behavior!", 4);
-  } else {
-    return a;
+SchemaPredicates.prototype.isInterfaceOfType = function isInterfaceOfType(typeCondition, typename) {
+  if (!typename || !typeCondition) {
+    return false;
   }
+
+  if (typename === typeCondition) {
+    return true;
+  }
+
+  var abstractType = this.schema.getType(typeCondition);
+  var objectType = this.schema.getType(typename);
+
+  if (abstractType instanceof graphql.GraphQLObjectType) {
+    return abstractType === objectType;
+  }
+
+  expectAbstractType(abstractType, typeCondition);
+  expectObjectType(objectType, typename);
+  return this.schema.isPossibleType(abstractType, objectType);
 };
 
-function expectObjectType(a, b) {
-  invariant(a instanceof graphql.GraphQLObjectType, "production" !== process.env.NODE_ENV ? "Invalid Object type: The type `" + b + "` is not an object in the defined schema, but the GraphQL document is traversing it." : "", 3);
+var getField = function (schema, typename, fieldName) {
+  var object = schema.getType(typename);
+  expectObjectType(object, typename);
+  var field = object.getFields()[fieldName];
+
+  if (field === undefined) {
+    process.env.NODE_ENV !== 'production' ? warn('Invalid field: The field `' + fieldName + '` does not exist on `' + typename + '`, ' + 'but the GraphQL document expects it to exist.\n' + 'Traversal will continue, however this may lead to undefined behavior!', 4) : void 0;
+    return undefined;
+  }
+
+  return field;
+};
+
+function expectObjectType(x, typename) {
+  invariant(x instanceof graphql.GraphQLObjectType, process.env.NODE_ENV !== "production" ? 'Invalid Object type: The type `' + typename + '` is not an object in the defined schema, ' + 'but the GraphQL document is traversing it.' : "", 3);
 }
 
-var isFragmentNode = function(a) {
-  return a.kind === graphql.Kind.FRAGMENT_DEFINITION;
-};
-
-function _ref(a) {
-  return a.kind === graphql.Kind.OPERATION_DEFINITION;
+function expectAbstractType(x, typename) {
+  invariant(x instanceof graphql.GraphQLInterfaceType || x instanceof graphql.GraphQLUnionType, process.env.NODE_ENV !== "production" ? 'Invalid Abstract type: The type `' + typename + '` is not an Interface or Union type in the defined schema, ' + 'but a fragment in the GraphQL document is using it as a type condition.' : "", 5);
 }
 
-var getMainOperation = function(a) {
-  invariant(!!(a = a.definitions.find(_ref)), "production" !== process.env.NODE_ENV ? "Invalid GraphQL document: All GraphQL documents must contain an OperationDefinitionnode for a query, subscription, or mutation." : "", 1);
-  return a;
+var isFragmentNode = function (node) {
+  return node.kind === graphql.Kind.FRAGMENT_DEFINITION;
 };
+/** Returns the main operation's definition */
 
-function _ref2(a, b) {
-  a[getName(b)] = b;
-  return a;
+
+function _ref(node) {
+  return node.kind === graphql.Kind.OPERATION_DEFINITION;
 }
 
-var getFragments = function(a) {
-  return a.definitions.filter(isFragmentNode).reduce(_ref2, {});
-}, shouldInclude = function(a, b) {
-  if (void 0 === (a = a.directives)) {
-    return !0;
-  }
-  for (var c = 0, d = a.length; c < d; c++) {
-    var e = a[c], f = getName(e), g = "include" === f;
-    if ((g || "skip" === f) && (e = e.arguments ? e.arguments[0] : null) && "if" === getName(e) && ("boolean" == typeof (e = graphql.valueFromASTUntyped(e.value, b)) || null === e)) {
-      return g ? !!e : !e;
+var getMainOperation = function (doc) {
+  var operation = doc.definitions.find(_ref);
+  invariant(!!operation, process.env.NODE_ENV !== "production" ? 'Invalid GraphQL document: All GraphQL documents must contain an OperationDefinition' + 'node for a query, subscription, or mutation.' : "", 1);
+  return operation;
+};
+/** Returns a mapping from fragment names to their selections */
+
+function _ref2(map, node) {
+  map[getName(node)] = node;
+  return map;
+}
+
+var getFragments = function (doc) {
+  return doc.definitions.filter(isFragmentNode).reduce(_ref2, {});
+};
+var shouldInclude = function (node, vars) {
+  var directives = node.directives;
+
+  if (directives === undefined) {
+    return true;
+  } // Finds any @include or @skip directive that forces the node to be skipped
+
+
+  for (var i = 0, l = directives.length; i < l; i++) {
+    var directive = directives[i];
+    var name = getName(directive); // Ignore other directives
+
+    var isInclude = name === 'include';
+
+    if (!isInclude && name !== 'skip') {
+      continue;
+    } // Get the first argument and expect it to be named "if"
+
+
+    var arg = directive.arguments ? directive.arguments[0] : null;
+
+    if (!arg || getName(arg) !== 'if') {
+      continue;
     }
+
+    var value = graphql.valueFromASTUntyped(arg.value, vars);
+
+    if (typeof value !== 'boolean' && value !== null) {
+      continue;
+    } // Return whether this directive forces us to skip
+    // `@include(if: false)` or `@skip(if: true)`
+
+
+    return isInclude ? !!value : !value;
   }
-  return !0;
-}, query = function(a, b, c) {
-  initDataState(a.data, 0);
-  return read(a, b, c);
-}, read = function(a, b, c) {
-  var d = getMainOperation(b.query), e = a.getRootKey(d.operation), f = getSelectionSet(d);
-  a = {
-    parentTypeName: e,
-    parentKey: e,
-    parentFieldKey: "",
-    fieldName: "",
-    variables: normalizeVariables(d, b.variables),
-    fragments: getFragments(b.query),
-    partial: !1,
-    store: a,
-    schemaPredicates: a.schemaPredicates
+
+  return true;
+};
+
+var query = function (store, request, data) {
+  initDataState(store.data, 0);
+  var result = read(store, request, data); // clearDataState();
+
+  return result;
+};
+var read = function (store, request, input) {
+  var operation = getMainOperation(request.query);
+  var rootKey = store.getRootKey(operation.operation);
+  var rootSelect = getSelectionSet(operation);
+  var ctx = {
+    parentTypeName: rootKey,
+    parentKey: rootKey,
+    parentFieldKey: '',
+    fieldName: '',
+    variables: normalizeVariables(operation, request.variables),
+    fragments: getFragments(request.query),
+    partial: false,
+    store: store,
+    schemaPredicates: store.schemaPredicates
   };
-  "production" !== process.env.NODE_ENV && pushDebugNode(e, d);
-  c = c || makeDict();
-  c = e !== a.store.getRootKey("query") ? readRoot(a, e, f, c) : readSelection(a, e, f, c);
+
+  if (process.env.NODE_ENV !== 'production') {
+    pushDebugNode(rootKey, operation);
+  }
+
+  var data = input || makeDict();
+  data = rootKey !== ctx.store.getRootKey('query') ? readRoot(ctx, rootKey, rootSelect, data) : readSelection(ctx, rootKey, rootSelect, data);
   return {
     dependencies: getCurrentDependencies(),
-    partial: void 0 === c ? !1 : a.partial,
-    data: void 0 === c ? null : c
+    partial: data === undefined ? false : ctx.partial,
+    data: data === undefined ? null : data
   };
-}, readRoot = function(a, b, c, d) {
-  if ("string" != typeof d.__typename) {
-    return d;
+};
+
+var readRoot = function (ctx, entityKey, select, originalData) {
+  if (typeof originalData.__typename !== 'string') {
+    return originalData;
   }
-  b = new SelectionIterator(b, b, c, a);
-  (c = makeDict()).__typename = d.__typename;
-  for (var e; void 0 !== (e = b.next()); ) {
-    var f = getFieldAlias(e), g = d[f];
-    void 0 !== e.selectionSet && null !== g ? (g = ensureData(g), c[f] = readRootField(a, getSelectionSet(e), g)) : c[f] = g;
-  }
-  return c;
-}, readRootField = function(a, b, c) {
-  if (Array.isArray(c)) {
-    for (var d = Array(c.length), e = 0, f = c.length; e < f; e++) {
-      d[e] = readRootField(a, b, c[e]);
+
+  var iter = new SelectionIterator(entityKey, entityKey, select, ctx);
+  var data = makeDict();
+  data.__typename = originalData.__typename;
+  var node;
+
+  while ((node = iter.next()) !== undefined) {
+    var fieldAlias = getFieldAlias(node);
+    var fieldValue = originalData[fieldAlias];
+
+    if (node.selectionSet !== undefined && fieldValue !== null) {
+      var fieldData = ensureData(fieldValue);
+      data[fieldAlias] = readRootField(ctx, getSelectionSet(node), fieldData);
+    } else {
+      data[fieldAlias] = fieldValue;
     }
-    return d;
   }
-  if (null === c) {
+
+  return data;
+};
+
+var readRootField = function (ctx, select, originalData) {
+  if (Array.isArray(originalData)) {
+    var newData = new Array(originalData.length);
+
+    for (var i = 0, l = originalData.length; i < l; i++) {
+      newData[i] = readRootField(ctx, select, originalData[i]);
+    }
+
+    return newData;
+  } else if (originalData === null) {
+    return null;
+  } // Write entity to key that falls back to the given parentFieldKey
+
+
+  var entityKey = ctx.store.keyOfEntity(originalData);
+
+  if (entityKey !== null) {
+    // We assume that since this is used for result data this can never be undefined,
+    // since the result data has already been written to the cache
+    var fieldValue = readSelection(ctx, entityKey, select, makeDict());
+    return fieldValue === undefined ? null : fieldValue;
+  } else {
+    return readRoot(ctx, originalData.__typename, select, originalData);
+  }
+};
+
+var readFragment = function (store, query, entity, variables) {
+  var fragments = getFragments(query);
+  var names = Object.keys(fragments);
+  var fragment = fragments[names[0]];
+
+  if (fragment === undefined) {
+    process.env.NODE_ENV !== 'production' ? warn('readFragment(...) was called with an empty fragment.\n' + 'You have to call it with at least one fragment in your GraphQL document.', 6) : void 0;
     return null;
   }
-  return null !== (d = a.store.keyOfEntity(c)) ? void 0 === (a = readSelection(a, d, b, makeDict())) ? null : a : readRoot(a, c.__typename, b, c);
-}, readFragment = function(a, b, c, d) {
-  b = getFragments(b);
-  var e = Object.keys(b);
-  if (void 0 === (e = b[e[0]])) {
-    return "production" !== process.env.NODE_ENV && warn("readFragment(...) was called with an empty fragment.\nYou have to call it with at least one fragment in your GraphQL document.", 6), 
-    null;
+
+  var typename = getFragmentTypeName(fragment);
+
+  if (typeof entity !== 'string' && !entity.__typename) {
+    entity.__typename = typename;
   }
-  var f = getFragmentTypeName(e);
-  "string" == typeof c || c.__typename || (c.__typename = f);
-  if (!(c = "string" != typeof c ? a.keyOfEntity(_extends({
-    __typename: f
-  }, c)) : c)) {
-    return "production" !== process.env.NODE_ENV && warn("Can't generate a key for readFragment(...).\nYou have to pass an `id` or `_id` field or create a custom `keys` config for `" + f + "`.", 7), 
-    null;
+
+  var entityKey = typeof entity !== 'string' ? store.keyOfEntity(_extends({
+    __typename: typename
+  }, entity)) : entity;
+
+  if (!entityKey) {
+    process.env.NODE_ENV !== 'production' ? warn("Can't generate a key for readFragment(...).\n" + 'You have to pass an `id` or `_id` field or create a custom `keys` config for `' + typename + '`.', 7) : void 0;
+    return null;
   }
-  "production" !== process.env.NODE_ENV && pushDebugNode(f, e);
-  return readSelection({
-    parentTypeName: f,
-    parentKey: c,
-    parentFieldKey: "",
-    fieldName: "",
-    variables: d || {},
-    fragments: b,
-    partial: !1,
-    store: a,
-    schemaPredicates: a.schemaPredicates
-  }, c, getSelectionSet(e), makeDict()) || null;
-}, readSelection = mobx.action((function(a, b, c, d) {
-  var e = a.store, f = a.schemaPredicates, g = b === e.getRootKey("query"), h = g ? b : readRecord(b, "__typename");
-  if ("string" == typeof h) {
-    d.__typename = h;
-    c = new SelectionIterator(h, b, c, a);
-    for (var k, m = !1, n = !1, l = function() {
-      var q = getName(k), l = getFieldArguments(k, a.variables), p = getFieldAlias(k), u = keyOfField(q, l), w = readRecord(b, u), y = function(a, b) {
-        updateDependencies(a, b);
-        return function(a, b, c) {
-          for (var d = 0, e = a.keys.length; d < e; d++) {
-            var f = a.optimistic[a.keys[d]].get(b);
-            if (void 0 !== f && c in f) {
-              return f;
-            }
-          }
-          return void 0 !== (a = a.base.get(b)) ? a : void 0;
-        }(currentData.records, a, b);
-      }(b, u), C = joinKeys(b, u), A = !1;
-      "production" !== process.env.NODE_ENV && f && h && f.isFieldAvailableOnType(h, q);
-      var t = void 0, B = e.resolvers[h];
-      if (void 0 !== B && "function" == typeof B[q]) {
-        if (a.parentTypeName = h, a.parentKey = b, a.parentFieldKey = C, a.fieldName = q, 
-        void 0 !== w && (d[p] = w), t = B[q](d, l || makeDict(), e, a), void 0 !== k.selectionSet && (t = resolveResolverResult(a, h, q, C, getSelectionSet(k), d[p] || makeDict(), t)), 
-        void 0 !== f && null === t && !f.isFieldNullable(h, q)) {
-          return {
-            v: void 0
-          };
-        }
-      } else if (void 0 === k.selectionSet) {
-        t = w, A = !0, void 0 === d[p] && Object.defineProperty(d, p, {
-          get: function c() {
-            return null != y ? y[p] : void 0;
-          }
+
+  if (process.env.NODE_ENV !== 'production') {
+    pushDebugNode(typename, fragment);
+  }
+
+  var ctx = {
+    parentTypeName: typename,
+    parentKey: entityKey,
+    parentFieldKey: '',
+    fieldName: '',
+    variables: variables || {},
+    fragments: fragments,
+    partial: false,
+    store: store,
+    schemaPredicates: store.schemaPredicates
+  };
+  return readSelection(ctx, entityKey, getSelectionSet(fragment), makeDict()) || null;
+};
+var readSelection = mobx.action(function (ctx, entityKey, select, data) {
+  var store = ctx.store;
+  var schemaPredicates = ctx.schemaPredicates;
+  var isQuery = entityKey === store.getRootKey('query'); // Get the __typename field for a given entity to check that it exists
+
+  var typename = !isQuery ? readRecord(entityKey, '__typename') : entityKey;
+
+  if (typeof typename !== 'string') {
+    return undefined;
+  }
+
+  data.__typename = typename;
+  var iter = new SelectionIterator(typename, entityKey, select, ctx);
+  var node;
+  var hasFields = false;
+  var hasPartials = false;
+
+  var loop = function () {
+    // Derive the needed data from our node.
+    var fieldName = getName(node);
+    var fieldArgs = getFieldArguments(node, ctx.variables);
+    var fieldAlias = getFieldAlias(node);
+    var fieldKey = keyOfField(fieldName, fieldArgs);
+    var fieldValue = readRecord(entityKey, fieldKey);
+    var fieldParent = readParent(entityKey, fieldKey);
+    var key = joinKeys(entityKey, fieldKey);
+    var pleaseDontAssign = false;
+
+    if (process.env.NODE_ENV !== 'production' && schemaPredicates && typename) {
+      schemaPredicates.isFieldAvailableOnType(typename, fieldName);
+    } // We temporarily store the data field in here, but undefined
+    // means that the value is missing from the cache
+
+
+    var dataFieldValue = void 0;
+    var resolvers = store.resolvers[typename];
+
+    function _ref() {
+      return fieldParent !== null && fieldParent !== undefined ? fieldParent[fieldAlias] : undefined;
+    }
+
+    function _ref2() {
+      var localLink = readLink(entityKey, fieldKey);
+
+      if (!localLink) {
+        return undefined;
+      }
+
+      var linkedEntity = resolveLink(ctx, localLink, localTypeName, fieldName, getSelectionSet(localNode), undefined);
+      return linkedEntity !== null && linkedEntity !== undefined ? linkedEntity : undefined;
+    }
+
+    if (resolvers !== undefined && typeof resolvers[fieldName] === 'function') {
+      // We have to update the information in context to reflect the info
+      // that the resolver will receive
+      ctx.parentTypeName = typename;
+      ctx.parentKey = entityKey;
+      ctx.parentFieldKey = key;
+      ctx.fieldName = fieldName; // We have a resolver for this field.
+      // Prepare the actual fieldValue, so that the resolver can use it
+
+      if (fieldValue !== undefined) {
+        data[fieldAlias] = fieldValue;
+      }
+
+      dataFieldValue = resolvers[fieldName](data, fieldArgs || makeDict(), store, ctx);
+
+      if (node.selectionSet !== undefined) {
+        // When it has a selection set we are resolving an entity with a
+        // subselection. This can either be a list or an object.
+        dataFieldValue = resolveResolverResult(ctx, typename, fieldName, key, getSelectionSet(node), data[fieldAlias] || makeDict(), dataFieldValue);
+      }
+
+      if (schemaPredicates !== undefined && dataFieldValue === null && !schemaPredicates.isFieldNullable(typename, fieldName)) {
+        // Special case for when null is not a valid value for the
+        // current field
+        return {
+          v: undefined
+        };
+      }
+    } else if (node.selectionSet === undefined) {
+      // The field is a scalar and can be retrieved directly
+      dataFieldValue = fieldValue;
+      pleaseDontAssign = true;
+
+      if (data[fieldAlias] === undefined) {
+        Object.defineProperty(data, fieldAlias, {
+          get: _ref
         });
-      } else if (void 0 !== (l = readLink(b, u))) {
-        if (t = resolveLink(a, l, h, q, getSelectionSet(k), d[p]), void 0 === d[p]) {
-          A = !0;
-          var E = k, D = h;
-          Object.defineProperty(d, p, {
-            get: function g() {
-              var c = readLink(b, u);
-              if (c) {
-                return null != (c = resolveLink(a, c, D, q, getSelectionSet(E), void 0)) ? c : void 0;
-              }
-            }
+      }
+    } else {
+      // We have a selection set which means that we'll be checking for links
+      var link = readLink(entityKey, fieldKey);
+
+      if (link !== undefined) {
+        dataFieldValue = resolveLink(ctx, link, typename, fieldName, getSelectionSet(node), data[fieldAlias]);
+
+        if (data[fieldAlias] === undefined) {
+          pleaseDontAssign = true;
+          var localNode = node;
+          var localTypeName = typename;
+          Object.defineProperty(data, fieldAlias, {
+            get: _ref2
           });
         }
-      } else {
-        "object" == typeof w && null !== w && (t = w);
+      } else if (typeof fieldValue === 'object' && fieldValue !== null) {
+        // The entity on the field was invalid but can still be recovered
+        dataFieldValue = fieldValue;
       }
-      if (void 0 === t && void 0 !== f && f.isFieldNullable(h, q)) {
-        n = !0, d[p] = null;
-      } else {
-        if (void 0 === t) {
-          return {
-            v: void 0
-          };
-        }
-        m = !0;
-        !1 === A && (d[p] = t);
-      }
-    }; void 0 !== (k = c.next()); ) {
-      var p = l();
-      if (p) {
-        return p.v;
-      }
-    }
-    n && (a.partial = !0);
-    return g && n && !m ? void 0 : d;
-  }
-})), resolveResolverResult = function(a, b, c, d, e, f, g) {
-  if (Array.isArray(g)) {
-    var h = a.schemaPredicates;
-    h = void 0 === h || h.isListNullable(b, c);
-    for (var k = Array(g.length), m = 0, n = g.length; m < n; m++) {
-      var l = resolveResolverResult(a, b, c, joinKeys(d, "" + m), e, void 0 !== f ? f[m] : void 0, g[m]);
-      if (void 0 !== l || h) {
-        k[m] = void 0 !== l ? l : null;
-      } else {
-        return;
+    } // Now that dataFieldValue has been retrieved it'll be set on data
+    // If it's uncached (undefined) but nullable we can continue assembling
+    // a partial query result
+
+
+    if (dataFieldValue === undefined && schemaPredicates !== undefined && schemaPredicates.isFieldNullable(typename, fieldName)) {
+      // The field is uncached but we have a schema that says it's nullable
+      // Set the field to null and continue
+      hasPartials = true;
+      data[fieldAlias] = null;
+    } else if (dataFieldValue === undefined) {
+      // The field is uncached and not nullable; return undefined
+      return {
+        v: undefined
+      };
+    } else {
+      // Otherwise continue as usual
+      hasFields = true;
+
+      if (pleaseDontAssign === false) {
+        data[fieldAlias] = dataFieldValue;
       }
     }
-    return k;
+  };
+
+  while ((node = iter.next()) !== undefined) {
+    var returned = loop();
+    if (returned) return returned.v;
   }
-  if (null == g) {
-    return g;
+
+  if (hasPartials) {
+    ctx.partial = true;
   }
-  if (isDataOrKey(g)) {
-    return b = void 0 === f ? makeDict() : f, "string" == typeof g ? readSelection(a, g, e, b) : function(a, b, c, d, e) {
-      var f = a.schemaPredicates;
-      b = a.store.keyOfEntity(e) || b;
-      var g = e.__typename, h = readRecord(b, "__typename") || g;
-      if ("string" != typeof h || g && h !== g) {
-        "production" !== process.env.NODE_ENV && warn("Invalid resolver data: The resolver at `" + b + "` returned an invalid typename that could not be reconciled with the cache.", 8);
-      } else {
-        d.__typename = h;
-        c = new SelectionIterator(h, b, c, a);
-        for (var k = !1, m = !1; void 0 !== (g = c.next()); ) {
-          var n = getName(g), l = getFieldAlias(g), p = keyOfField(n, getFieldArguments(g, a.variables)), x = joinKeys(b, p), v = readRecord(b, p), q = e[n];
-          "production" !== process.env.NODE_ENV && f && h && f.isFieldAvailableOnType(h, n);
-          var r = void 0;
-          void 0 !== q && void 0 === g.selectionSet ? r = q : void 0 === g.selectionSet ? r = v : void 0 !== q ? r = resolveResolverResult(a, h, n, x, getSelectionSet(g), d[l], q) : void 0 !== (p = readLink(b, p)) ? r = resolveLink(a, p, h, n, getSelectionSet(g), d[l]) : "object" == typeof v && null !== v && (r = v);
-          if (void 0 === r && void 0 !== f && f.isFieldNullable(h, n)) {
-            m = !0, d[l] = null;
-          } else {
-            if (void 0 === r) {
-              return;
-            }
-            k = !0;
-            d[l] = r;
-          }
-        }
-        m && (a.partial = !0);
-        return k ? d : void 0;
+
+  return isQuery && hasPartials && !hasFields ? undefined : data;
+});
+
+var readResolverResult = function (ctx, key, select, data, result) {
+  var store = ctx.store;
+  var schemaPredicates = ctx.schemaPredicates;
+  var entityKey = store.keyOfEntity(result) || key;
+  var resolvedTypename = result.__typename;
+  var typename = readRecord(entityKey, '__typename') || resolvedTypename;
+
+  if (typeof typename !== 'string' || resolvedTypename && typename !== resolvedTypename) {
+    // TODO: This may be an invalid error for resolvers that return interfaces
+    process.env.NODE_ENV !== 'production' ? warn('Invalid resolver data: The resolver at `' + entityKey + '` returned an ' + 'invalid typename that could not be reconciled with the cache.', 8) : void 0;
+    return undefined;
+  } // The following closely mirrors readSelection, but differs only slightly for the
+  // sake of resolving from an existing resolver result
+
+
+  data.__typename = typename;
+  var iter = new SelectionIterator(typename, entityKey, select, ctx);
+  var node;
+  var hasFields = false;
+  var hasPartials = false;
+
+  while ((node = iter.next()) !== undefined) {
+    // Derive the needed data from our node.
+    var fieldName = getName(node);
+    var fieldAlias = getFieldAlias(node);
+    var fieldKey = keyOfField(fieldName, getFieldArguments(node, ctx.variables));
+    var key$1 = joinKeys(entityKey, fieldKey);
+    var fieldValue = readRecord(entityKey, fieldKey);
+    var resultValue = result[fieldName];
+
+    if (process.env.NODE_ENV !== 'production' && schemaPredicates && typename) {
+      schemaPredicates.isFieldAvailableOnType(typename, fieldName);
+    } // We temporarily store the data field in here, but undefined
+    // means that the value is missing from the cache
+
+
+    var dataFieldValue = void 0;
+
+    if (resultValue !== undefined && node.selectionSet === undefined) {
+      // The field is a scalar and can be retrieved directly from the result
+      dataFieldValue = resultValue;
+    } else if (node.selectionSet === undefined) {
+      // The field is a scalar but isn't on the result, so it's retrieved from the cache
+      dataFieldValue = fieldValue;
+    } else if (resultValue !== undefined) {
+      // We start walking the nested resolver result here
+      dataFieldValue = resolveResolverResult(ctx, typename, fieldName, key$1, getSelectionSet(node), data[fieldAlias], resultValue);
+    } else {
+      // Otherwise we attempt to get the missing field from the cache
+      var link = readLink(entityKey, fieldKey);
+
+      if (link !== undefined) {
+        dataFieldValue = resolveLink(ctx, link, typename, fieldName, getSelectionSet(node), data[fieldAlias]);
+      } else if (typeof fieldValue === 'object' && fieldValue !== null) {
+        // The entity on the field was invalid but can still be recovered
+        dataFieldValue = fieldValue;
       }
-    }(a, d, e, b, g);
+    } // Now that dataFieldValue has been retrieved it'll be set on data
+    // If it's uncached (undefined) but nullable we can continue assembling
+    // a partial query result
+
+
+    if (dataFieldValue === undefined && schemaPredicates !== undefined && schemaPredicates.isFieldNullable(typename, fieldName)) {
+      // The field is uncached but we have a schema that says it's nullable
+      // Set the field to null and continue
+      hasPartials = true;
+      data[fieldAlias] = null;
+    } else if (dataFieldValue === undefined) {
+      // The field is uncached and not nullable; return undefined
+      return undefined;
+    } else {
+      // Otherwise continue as usual
+      hasFields = true;
+      data[fieldAlias] = dataFieldValue;
+    }
   }
-  "production" !== process.env.NODE_ENV && warn("Invalid resolver value: The field at `" + d + "` is a scalar (number, boolean, etc), but the GraphQL query expects a selection set for this field.", 9);
-}, resolveLink = function(a, b, c, d, e, f) {
-  if (Array.isArray(b)) {
-    var g = a.schemaPredicates;
-    g = void 0 !== g && g.isListNullable(c, d);
-    for (var h = Array(b.length), k = 0, m = b.length; k < m; k++) {
-      var n = resolveLink(a, b[k], c, d, e, void 0 !== f ? f[k] : void 0);
-      if (void 0 !== n || g) {
-        h[k] = void 0 !== n ? n : null;
+
+  if (hasPartials) {
+    ctx.partial = true;
+  }
+
+  return !hasFields ? undefined : data;
+};
+
+var resolveResolverResult = function (ctx, typename, fieldName, key, select, prevData, result) {
+  if (Array.isArray(result)) {
+    var schemaPredicates = ctx.schemaPredicates; // Check whether values of the list may be null; for resolvers we assume
+    // that they can be, since it's user-provided data
+
+    var isListNullable = schemaPredicates === undefined || schemaPredicates.isListNullable(typename, fieldName);
+    var data = new Array(result.length);
+
+    for (var i = 0, l = result.length; i < l; i++) {
+      // Recursively read resolver result
+      var childResult = resolveResolverResult(ctx, typename, fieldName, joinKeys(key, "" + i), select, // Get the inner previous data from prevData
+      prevData !== undefined ? prevData[i] : undefined, result[i]);
+
+      if (childResult === undefined && !isListNullable) {
+        return undefined;
       } else {
-        return;
+        data[i] = childResult !== undefined ? childResult : null;
       }
     }
-    return h;
+
+    return data;
+  } else if (result === null || result === undefined) {
+    return result;
+  } else if (isDataOrKey(result)) {
+    var data$1 = prevData === undefined ? makeDict() : prevData;
+    return typeof result === 'string' ? readSelection(ctx, result, select, data$1) : readResolverResult(ctx, key, select, data$1, result);
+  } else {
+    process.env.NODE_ENV !== 'production' ? warn('Invalid resolver value: The field at `' + key + '` is a scalar (number, boolean, etc)' + ', but the GraphQL query expects a selection set for this field.', 9) : void 0;
+    return undefined;
   }
-  return null === b ? null : readSelection(a, b, e, void 0 === f ? makeDict() : f);
-}, isDataOrKey = function(a) {
-  return "string" == typeof a || "object" == typeof a && "string" == typeof a.__typename;
-}, addCacheOutcome = function(a, b) {
-  return _extends(_extends({}, a), {
-    context: _extends(_extends({}, a.context), {
-      meta: _extends(_extends({}, a.context.meta), {
-        cacheOutcome: b
+};
+
+var resolveLink = function (ctx, link, typename, fieldName, select, prevData) {
+  if (Array.isArray(link)) {
+    var schemaPredicates = ctx.schemaPredicates;
+    var isListNullable = schemaPredicates !== undefined && schemaPredicates.isListNullable(typename, fieldName);
+    var newLink = new Array(link.length);
+
+    for (var i = 0, l = link.length; i < l; i++) {
+      var childLink = resolveLink(ctx, link[i], typename, fieldName, select, prevData !== undefined ? prevData[i] : undefined);
+
+      if (childLink === undefined && !isListNullable) {
+        return undefined;
+      } else {
+        newLink[i] = childLink !== undefined ? childLink : null;
+      }
+    }
+
+    return newLink;
+  } else if (link === null) {
+    return null;
+  } else {
+    // console.log({link, prevData})
+    return readSelection(ctx, link, select, prevData === undefined ? makeDict() : prevData);
+  }
+};
+
+var isDataOrKey = function (x) {
+  return typeof x === 'string' || typeof x === 'object' && typeof x.__typename === 'string';
+};
+
+var addCacheOutcome = function (op, outcome) {
+  return _extends(_extends({}, op), {
+    context: _extends(_extends({}, op.context), {
+      meta: _extends(_extends({}, op.context.meta), {
+        cacheOutcome: outcome
       })
     })
   });
-}, addTypeNames = function(a) {
-  return _extends(_extends({}, a), {
-    query: core.formatDocument(a.query)
+}; // Returns the given operation with added __typename fields on its query
+
+
+var addTypeNames = function (op) {
+  return _extends(_extends({}, op), {
+    query: core.formatDocument(op.query)
   });
-}, getRequestPolicy = function(a) {
-  return a.context.requestPolicy;
-}, isQueryOperation = function(a) {
-  return "query" === a.operationName;
-}, isCacheableQuery = function(a) {
-  return isQueryOperation(a) && "network-only" !== getRequestPolicy(a);
-}, toRequestPolicy = function(a, b) {
-  return _extends(_extends({}, a), {
-    context: _extends(_extends({}, a.context), {
-      requestPolicy: b
+}; // Retrieves the requestPolicy from an operation
+
+
+var getRequestPolicy = function (op) {
+  return op.context.requestPolicy;
+}; // Returns whether an operation is a query
+
+
+var isQueryOperation = function (op) {
+  return op.operationName === 'query';
+}; // Returns whether an operation is a mutation
+
+
+var isMutationOperation = function (op) {
+  return op.operationName === 'mutation';
+}; // Returns whether an operation can potentially be read from cache
+
+
+var isCacheableQuery = function (op) {
+  return isQueryOperation(op) && getRequestPolicy(op) !== 'network-only';
+}; // Returns whether an operation potentially triggers an optimistic update
+
+
+var isOptimisticMutation = function (op) {
+  return isMutationOperation(op) && getRequestPolicy(op) !== 'network-only';
+}; // Copy an operation and change the requestPolicy to skip the cache
+
+
+var toRequestPolicy = function (operation, requestPolicy) {
+  return _extends(_extends({}, operation), {
+    context: _extends(_extends({}, operation.context), {
+      requestPolicy: requestPolicy
     })
   });
 };
 
-function _ref3(a) {
-  return isCacheableQuery(a);
+function _ref3(op) {
+  return isCacheableQuery(op);
 }
 
-function _ref4(a) {
-  return addCacheOutcome(a.operation, a.outcome);
+function _ref4(res) {
+  return addCacheOutcome(res.operation, res.outcome);
 }
 
-function _ref5(a) {
-  return "miss" === a.outcome;
+function _ref5(res) {
+  return res.outcome === 'miss';
 }
 
-function _ref7(a) {
-  return "miss" !== a.outcome;
+function _ref7(res) {
+  return res.outcome !== 'miss';
 }
 
-function _ref8(a) {
-  return !isCacheableQuery(a);
+function _ref8(op) {
+  return !isCacheableQuery(op);
 }
 
-var extractSelectionsFromQuery = function(a, b) {
-  var c = [], d = [], e = new graphql.TypeInfo(a);
-  graphql.visit(b, graphql.visitWithTypeInfo(e, {
-    Field: function(a) {
-      if (a.selectionSet) {
-        var b = getTypeName(e);
-        d.push({
+var cacheExchange = function (opts) {
+  return function (ref) {
+    var forward = ref.forward;
+    var client = ref.client;
+
+    if (!opts) {
+      opts = {};
+    }
+
+    var store = new Store(opts.schema ? new SchemaPredicates(opts.schema) : undefined, opts.resolvers, opts.updates, opts.optimistic, opts.keys);
+    var hydration;
+
+    function _ref(entries) {
+      hydrateData(store.data, storage, entries);
+    }
+
+    if (opts.storage) {
+      var storage = opts.storage;
+      hydration = storage.read().then(_ref);
+    }
+
+    var optimisticKeysToDependencies = new Map();
+    var ops = new Map();
+    var deps = makeDict();
+
+    var collectPendingOperations = function (pendingOperations, dependencies) {
+      function _ref2(dep) {
+        var keys = deps[dep];
+
+        if (keys !== undefined) {
+          deps[dep] = [];
+
+          for (var i = 0, l = keys.length; i < l; i++) {
+            pendingOperations.add(keys[i]);
+          }
+        }
+      }
+
+      if (dependencies !== undefined) {
+        // Collect operations that will be updated due to cache changes
+        dependencies.forEach(_ref2);
+      }
+    };
+
+    var executePendingOperations = function (operation, pendingOperations) {
+      // Reexecute collected operations and delete them from the mapping
+      pendingOperations.forEach(function (key) {
+        if (key !== operation.key) {
+          var op = ops.get(key);
+
+          if (op !== undefined) {
+            ops.delete(key);
+            client.reexecuteOperation(toRequestPolicy(op, 'cache-first'));
+          }
+        }
+      });
+    }; // This executes an optimistic update for mutations and registers it if necessary
+
+
+    var optimisticUpdate = function (operation) {
+      if (isOptimisticMutation(operation)) {
+        var key = operation.key;
+        var ref = writeOptimistic(store, operation, key);
+        var dependencies = ref.dependencies;
+
+        if (dependencies.size !== 0) {
+          optimisticKeysToDependencies.set(key, dependencies);
+          var pendingOperations = new Set();
+          collectPendingOperations(pendingOperations, dependencies);
+          executePendingOperations(operation, pendingOperations);
+        }
+      }
+    }; // This updates the known dependencies for the passed operation
+
+
+    var updateDependencies = function (op, dependencies) {
+      dependencies.forEach(function (dep) {
+        var keys = deps[dep] || (deps[dep] = []);
+        keys.push(op.key);
+
+        if (!ops.has(op.key)) {
+          ops.set(op.key, getRequestPolicy(op) === 'network-only' ? toRequestPolicy(op, 'cache-and-network') : op);
+        }
+      });
+    }; // Retrieves a query result from cache and adds an `isComplete` hint
+    // This hint indicates whether the result is "complete" or not
+
+
+    var operationResultFromCache = function (operation) {
+      var ref = query(store, operation);
+      var data = ref.data;
+      var dependencies = ref.dependencies;
+      var partial = ref.partial;
+      var cacheOutcome;
+
+      if (data === null) {
+        cacheOutcome = 'miss';
+      } else {
+        updateDependencies(operation, dependencies);
+        cacheOutcome = !partial || getRequestPolicy(operation) === 'cache-only' ? 'hit' : 'partial';
+      }
+
+      return {
+        outcome: cacheOutcome,
+        operation: operation,
+        data: data
+      };
+    }; // Take any OperationResult and update the cache with it
+
+
+    var updateCacheWithResult = function (result) {
+      var operation = result.operation;
+      var error = result.error;
+      var extensions = result.extensions;
+      var isQuery = isQueryOperation(operation);
+      var data = result.data; // Clear old optimistic values from the store
+
+      var key = operation.key;
+      var pendingOperations = new Set();
+      collectPendingOperations(pendingOperations, optimisticKeysToDependencies.get(key));
+      optimisticKeysToDependencies.delete(key);
+      clearOptimistic(store.data, key);
+      var writeDependencies;
+      var queryDependencies;
+
+      if (data !== null && data !== undefined) {
+        writeDependencies = write(store, operation, data).dependencies;
+
+        if (isQuery) {
+          var queryResult = query(store, operation);
+          data = queryResult.data;
+          queryDependencies = queryResult.dependencies;
+        } else {
+          data = query(store, operation, data).data;
+        }
+      } // Collect all write dependencies and query dependencies for queries
+
+
+      collectPendingOperations(pendingOperations, writeDependencies);
+
+      if (isQuery) {
+        collectPendingOperations(pendingOperations, queryDependencies);
+      } // Execute all pending operations related to changed dependencies
+
+
+      executePendingOperations(result.operation, pendingOperations); // Update this operation's dependencies if it's a query
+
+      if (isQuery && queryDependencies !== undefined) {
+        updateDependencies(result.operation, queryDependencies);
+      }
+
+      return {
+        data: data,
+        error: error,
+        extensions: extensions,
+        operation: operation
+      };
+    };
+
+    function _ref6(res) {
+      var operation = res.operation;
+      var outcome = res.outcome;
+      var policy = getRequestPolicy(operation);
+      var result = {
+        operation: addCacheOutcome(operation, outcome),
+        data: res.data,
+        error: res.error,
+        extensions: res.extensions
+      };
+
+      if (policy === 'cache-and-network' || policy === 'cache-first' && outcome === 'partial') {
+        result.stale = true;
+        client.reexecuteOperation(toRequestPolicy(operation, 'network-only'));
+      }
+
+      return result;
+    }
+
+    return function (ops$) {
+      var sharedOps$ = wonka.share(ops$); // Buffer operations while waiting on hydration to finish
+      // If no hydration takes place we replace this stream with an empty one
+
+      var bufferedOps$ = hydration ? wonka.mergeMap(wonka.fromArray)(wonka.take(1)(wonka.buffer(wonka.fromPromise(hydration))(sharedOps$))) : wonka.empty;
+      var inputOps$ = wonka.share(wonka.tap(optimisticUpdate)(wonka.map(addTypeNames)(wonka.concat([bufferedOps$, sharedOps$])))); // Filter by operations that are cacheable and attempt to query them from the cache
+
+      var cache$ = wonka.share(wonka.map(operationResultFromCache)(wonka.filter(_ref3)(inputOps$))); // Rebound operations that are incomplete, i.e. couldn't be queried just from the cache
+
+      var cacheOps$ = wonka.map(_ref4)(wonka.filter(_ref5)(cache$)); // Resolve OperationResults that the cache was able to assemble completely and trigger
+      // a network request if the current operation's policy is cache-and-network
+
+      var cacheResult$ = wonka.map(_ref6)(wonka.filter(_ref7)(cache$)); // Forward operations that aren't cacheable and rebound operations
+      // Also update the cache with any network results
+
+      var result$ = wonka.map(updateCacheWithResult)(forward(wonka.merge([wonka.filter(_ref8)(inputOps$), cacheOps$])));
+      return wonka.merge([result$, cacheResult$]);
+    };
+  };
+};
+
+/** An exchange for auto-populating mutations with a required response body. */
+
+var populateExchange = function (ref) {
+  var ogSchema = ref.schema;
+  return function (ref) {
+    var forward = ref.forward;
+    var schema = graphql.buildClientSchema(ogSchema);
+    /** List of operation keys that have already been parsed. */
+
+    var parsedOperations = new Set();
+    /** List of operation keys that have not been torn down. */
+
+    var activeOperations = new Set();
+    /** Collection of fragments used by the user. */
+
+    var userFragments = makeDict();
+    /** Collection of actively in use type fragments. */
+
+    var activeTypeFragments = makeDict();
+    /** Handle mutation and inject selections + fragments. */
+
+    function _ref(s) {
+      return activeOperations.has(s.key);
+    }
+
+    var handleIncomingMutation = function (op) {
+      if (op.operationName !== 'mutation') {
+        return op;
+      }
+
+      var activeSelections = makeDict();
+
+      for (var name in activeTypeFragments) {
+        activeSelections[name] = activeTypeFragments[name].filter(_ref);
+      }
+
+      return _extends(_extends({}, op), {
+        query: addFragmentsToQuery(schema, op.query, activeSelections, userFragments)
+      });
+    };
+    /** Handle query and extract fragments. */
+
+
+    var handleIncomingQuery = function (ref) {
+      var key = ref.key;
+      var operationName = ref.operationName;
+      var query = ref.query;
+
+      if (operationName !== 'query') {
+        return;
+      }
+
+      activeOperations.add(key);
+
+      if (parsedOperations.has(key)) {
+        return;
+      }
+
+      parsedOperations.add(key);
+      var ref$1 = extractSelectionsFromQuery(schema, query);
+      var extractedFragments = ref$1[0];
+      var newFragments = ref$1[1];
+
+      for (var i = 0, l = extractedFragments.length; i < l; i++) {
+        var fragment = extractedFragments[i];
+        userFragments[getName(fragment)] = fragment;
+      }
+
+      for (var i$1 = 0, l$1 = newFragments.length; i$1 < l$1; i$1++) {
+        var fragment$1 = newFragments[i$1];
+        var type = getName(fragment$1.typeCondition);
+        var current = activeTypeFragments[type] || (activeTypeFragments[type] = []);
+        fragment$1.name.value += current.length;
+        current.push({
+          key: key,
+          fragment: fragment$1
+        });
+      }
+    };
+
+    var handleIncomingTeardown = function (ref) {
+      var key = ref.key;
+      var operationName = ref.operationName;
+
+      if (operationName === 'teardown') {
+        activeOperations.delete(key);
+      }
+    };
+
+    return function (ops$) {
+      return forward(wonka.map(handleIncomingMutation)(wonka.tap(handleIncomingTeardown)(wonka.tap(handleIncomingQuery)(ops$))));
+    };
+  };
+};
+/** Gets typed selection sets and fragments from query */
+
+var extractSelectionsFromQuery = function (schema, query) {
+  var extractedFragments = [];
+  var newFragments = [];
+  var typeInfo = new graphql.TypeInfo(schema);
+  graphql.visit(query, graphql.visitWithTypeInfo(typeInfo, {
+    Field: function (node) {
+      if (node.selectionSet) {
+        var type = getTypeName(typeInfo);
+        newFragments.push({
           kind: graphql.Kind.FRAGMENT_DEFINITION,
           typeCondition: {
             kind: graphql.Kind.NAMED_TYPE,
-            name: nameNode(b)
+            name: nameNode(type)
           },
-          name: nameNode(b + "_PopulateFragment_"),
-          selectionSet: a.selectionSet
+          name: nameNode(type + "_PopulateFragment_"),
+          selectionSet: node.selectionSet
         });
       }
     },
-    FragmentDefinition: function(a) {
-      c.push(a);
+    FragmentDefinition: function (node) {
+      extractedFragments.push(node);
     }
   }));
-  return [ c, d ];
+  return [extractedFragments, newFragments];
 };
+/** Replaces populate decorator with fragment spreads + fragments. */
 
-function _ref2$1(a) {
-  return "populate" !== getName(a);
+function _ref2$1(d) {
+  return getName(d) !== 'populate';
 }
 
-function _ref4$1(a, b) {
-  "FragmentDefinition" === b.kind && a.add(b.name.value);
-  return a;
+function _ref4$1(set, definition) {
+  if (definition.kind === 'FragmentDefinition') {
+    set.add(definition.name.value);
+  }
+
+  return set;
 }
 
-var addFragmentsToQuery = function(a, b, c, d) {
-  function e(a, b) {
-    if (!(b = c[b.name])) {
-      return a;
+var addFragmentsToQuery = function (schema, query, activeTypeFragments, userFragments) {
+  var typeInfo = new graphql.TypeInfo(schema);
+  var requiredUserFragments = makeDict();
+  var additionalFragments = makeDict();
+  /** Fragments provided and used by the current query */
+
+  var existingFragmentsForQuery = new Set();
+
+  function _ref3(p, possibleType) {
+    var typeFrags = activeTypeFragments[possibleType.name];
+
+    if (!typeFrags) {
+      return p;
     }
-    for (var e = 0, f = b.length; e < f; e++) {
-      for (var m = b[e].fragment, n = getName(m), q = getUsedFragments(m), r = 0, z = q.length; r < z; r++) {
-        var u = q[r];
-        k.has(u) || (g[u] = d[u]);
-      }
-      h[n] = m;
-      a.push({
+
+    for (var i = 0, l = typeFrags.length; i < l; i++) {
+      var ref = typeFrags[i];
+      var fragment = ref.fragment;
+      var fragmentName = getName(fragment);
+      var usedFragments = getUsedFragments(fragment); // Add used fragment for insertion at Document node
+
+      for (var j = 0, l$1 = usedFragments.length; j < l$1; j++) {
+        var name = usedFragments[j];
+
+        if (!existingFragmentsForQuery.has(name)) {
+          requiredUserFragments[name] = userFragments[name];
+        }
+      } // Add fragment for insertion at Document node
+
+
+      additionalFragments[fragmentName] = fragment;
+      p.push({
         kind: graphql.Kind.FRAGMENT_SPREAD,
-        name: nameNode(n)
+        name: nameNode(fragmentName)
       });
     }
-    return a;
+
+    return p;
   }
-  var f = new graphql.TypeInfo(a), g = makeDict(), h = makeDict(), k = new Set;
-  return graphql.visit(b, graphql.visitWithTypeInfo(f, {
+
+  return graphql.visit(query, graphql.visitWithTypeInfo(typeInfo, {
     Field: {
-      enter: function(b) {
-        if (b.directives) {
-          var c = b.directives.filter(_ref2$1);
-          if (c.length !== b.directives.length) {
-            var d = getTypes(a, f).reduce(e, []), g = getSelectionSet(b);
-            d = 0 !== g.length + d.length ? d.concat(g) : [ {
-              kind: graphql.Kind.FIELD,
-              name: nameNode("__typename")
-            } ];
-            return _extends(_extends({}, b), {
-              directives: c,
-              selectionSet: {
-                kind: graphql.Kind.SELECTION_SET,
-                selections: d
-              }
-            });
-          }
+      enter: function (node) {
+        if (!node.directives) {
+          return;
         }
+
+        var directives = node.directives.filter(_ref2$1);
+
+        if (directives.length === node.directives.length) {
+          return;
+        }
+
+        var possibleTypes = getTypes(schema, typeInfo);
+        var newSelections = possibleTypes.reduce(_ref3, []);
+        var existingSelections = getSelectionSet(node);
+        var selections = existingSelections.length + newSelections.length !== 0 ? newSelections.concat(existingSelections) : [{
+          kind: graphql.Kind.FIELD,
+          name: nameNode('__typename')
+        }];
+        return _extends(_extends({}, node), {
+          directives: directives,
+          selectionSet: {
+            kind: graphql.Kind.SELECTION_SET,
+            selections: selections
+          }
+        });
       }
     },
     Document: {
-      enter: function(a) {
-        a.definitions.reduce(_ref4$1, k);
+      enter: function (node) {
+        node.definitions.reduce(_ref4$1, existingFragmentsForQuery);
       },
-      leave: function(a) {
-        var c, b = [].concat(a.definitions);
-        for (c in h) {
-          b.push(h[c]);
+      leave: function (node) {
+        var definitions = [].concat(node.definitions);
+
+        for (var key in additionalFragments) {
+          definitions.push(additionalFragments[key]);
         }
-        for (var d in g) {
-          b.push(g[d]);
+
+        for (var key$1 in requiredUserFragments) {
+          definitions.push(requiredUserFragments[key$1]);
         }
-        return _extends(_extends({}, a), {
-          definitions: b
+
+        return _extends(_extends({}, node), {
+          definitions: definitions
         });
       }
     }
   }));
-}, nameNode = function(a) {
+};
+
+var nameNode = function (value) {
   return {
     kind: graphql.Kind.NAME,
-    value: a
+    value: value
   };
-}, getTypes = function(a, b) {
-  b = unwrapType(b.getType());
-  return graphql.isCompositeType(b) ? graphql.isAbstractType(b) ? a.getPossibleTypes(b) : [ b ] : ("production" !== process.env.NODE_ENV && warn("Invalid type: The type ` + type + ` is used with @populate but does not exist.", 17), 
-  []);
-}, getTypeName = function(a) {
-  invariant((a = unwrapType(a.getType())) && !graphql.isAbstractType(a), "production" !== process.env.NODE_ENV ? "Invalid TypeInfo state: Found no flat schema type when one was expected." : "", 18);
-  return a.toString();
-}, getUsedFragments = function(a) {
-  var b = [];
-  graphql.visit(a, {
-    FragmentSpread: function(a) {
-      b.push(getName(a));
+};
+/** Get all possible types for node with TypeInfo. */
+
+
+var getTypes = function (schema, typeInfo) {
+  var type = unwrapType(typeInfo.getType());
+
+  if (!graphql.isCompositeType(type)) {
+    process.env.NODE_ENV !== 'production' ? warn('Invalid type: The type ` + type + ` is used with @populate but does not exist.', 17) : void 0;
+    return [];
+  }
+
+  return graphql.isAbstractType(type) ? schema.getPossibleTypes(type) : [type];
+};
+/** Get name of non-abstract type for adding to 'activeTypeFragments'. */
+
+
+var getTypeName = function (typeInfo) {
+  var type = unwrapType(typeInfo.getType());
+  invariant(type && !graphql.isAbstractType(type), process.env.NODE_ENV !== "production" ? 'Invalid TypeInfo state: Found no flat schema type when one was expected.' : "", 18);
+  return type.toString();
+};
+/** Get fragment names referenced by node. */
+
+
+var getUsedFragments = function (node) {
+  var names = [];
+  graphql.visit(node, {
+    FragmentSpread: function (f) {
+      names.push(getName(f));
     }
   });
-  return b;
+  return names;
 };
 
 exports.Store = Store;
-
-exports.cacheExchange = function(a) {
-  return function(b) {
-    function d(a) {
-      var b = a.operation, c = a.outcome, d = getRequestPolicy(b);
-      a = {
-        operation: addCacheOutcome(b, c),
-        data: a.data,
-        error: a.error,
-        extensions: a.extensions
-      };
-      if ("cache-and-network" === d || "cache-first" === d && "partial" === c) {
-        a.stale = !0, f.reexecuteOperation(toRequestPolicy(b, "network-only"));
-      }
-      return a;
-    }
-    var e = b.forward, f = b.client;
-    a || (a = {});
-    var g = new Store(a.schema ? new SchemaPredicates(a.schema) : void 0, a.resolvers, a.updates, a.optimistic, a.keys);
-    if (a.storage) {
-      var h = a.storage;
-      var k = h.read().then((function c(a) {
-        hydrateData(g.data, h, a);
-      }));
-    }
-    var m = new Map, n = new Map, l = makeDict(), p = function(a, b) {
-      void 0 !== b && b.forEach((function c(b) {
-        var c = l[b];
-        if (void 0 !== c) {
-          l[b] = [];
-          b = 0;
-          for (var d = c.length; b < d; b++) {
-            a.add(c[b]);
-          }
-        }
-      }));
-    }, x = function(a, b) {
-      b.forEach((function(b) {
-        if (b !== a.key) {
-          var c = n.get(b);
-          void 0 !== c && (n.delete(b), f.reexecuteOperation(toRequestPolicy(c, "cache-first")));
-        }
-      }));
-    }, v = function(a) {
-      if (function(a) {
-        return function(a) {
-          return "mutation" === a.operationName;
-        }(a) && "network-only" !== getRequestPolicy(a);
-      }(a)) {
-        var b = a.key, c = writeOptimistic(g, a, b).dependencies;
-        0 !== c.size && (m.set(b, c), b = new Set, p(b, c), x(a, b));
-      }
-    }, q = function(a, b) {
-      b.forEach((function(b) {
-        (l[b] || (l[b] = [])).push(a.key);
-        n.has(a.key) || n.set(a.key, "network-only" === getRequestPolicy(a) ? toRequestPolicy(a, "cache-and-network") : a);
-      }));
-    }, r = function(a) {
-      var b = query(g, a), c = b.data, d = b.dependencies;
-      b = b.partial;
-      null === c ? d = "miss" : (q(a, d), d = b && "cache-only" !== getRequestPolicy(a) ? "partial" : "hit");
-      return {
-        outcome: d,
-        operation: a,
-        data: c
-      };
-    }, z = function(a) {
-      var b = a.operation, c = a.error, d = a.extensions, e = isQueryOperation(b), f = a.data, h = b.key, k = new Set;
-      p(k, m.get(h));
-      m.delete(h);
-      !function(a, b) {
-        delete a.refLock[b];
-        clearOptimisticNodes(a.records, b);
-        clearOptimisticNodes(a.links, b);
-      }(g.data, h);
-      if (null != f) {
-        var n = write(g, b, f).dependencies;
-        if (e) {
-          f = (h = query(g, b)).data;
-          var l = h.dependencies;
-        } else {
-          f = query(g, b, f).data;
-        }
-      }
-      p(k, n);
-      e && p(k, l);
-      x(a.operation, k);
-      e && void 0 !== l && q(a.operation, l);
-      return {
-        data: f,
-        error: c,
-        extensions: d,
-        operation: b
-      };
-    };
-    return function(a) {
-      a = wonka.share(a);
-      var b = k ? wonka.mergeMap(wonka.fromArray)(wonka.take(1)(wonka.buffer(wonka.fromPromise(k))(a))) : wonka.empty;
-      a = wonka.share(wonka.tap(v)(wonka.map(addTypeNames)(wonka.concat([ b, a ]))));
-      var c = wonka.share(wonka.map(r)(wonka.filter(_ref3)(a)));
-      b = wonka.map(_ref4)(wonka.filter(_ref5)(c));
-      c = wonka.map(d)(wonka.filter(_ref7)(c));
-      a = wonka.map(z)(e(wonka.merge([ wonka.filter(_ref8)(a), b ])));
-      return wonka.merge([ a, c ]);
-    };
-  };
-};
-
+exports.cacheExchange = cacheExchange;
 exports.clearDataState = clearDataState;
-
 exports.initDataState = initDataState;
-
-exports.populateExchange = function(a) {
-  var b = a.schema;
-  return function(a) {
-    function c(a) {
-      return h.has(a.key);
-    }
-    var e = a.forward, f = graphql.buildClientSchema(b), g = new Set, h = new Set, k = makeDict(), m = makeDict(), n = function(a) {
-      if ("mutation" !== a.operationName) {
-        return a;
-      }
-      var d, b = makeDict();
-      for (d in m) {
-        b[d] = m[d].filter(c);
-      }
-      return _extends(_extends({}, a), {
-        query: addFragmentsToQuery(f, a.query, b, k)
-      });
-    }, l = function(a) {
-      var b = a.key, c = a.query;
-      if ("query" === a.operationName && (h.add(b), !g.has(b))) {
-        g.add(b);
-        c = (a = extractSelectionsFromQuery(f, c))[0];
-        a = a[1];
-        for (var d = 0, e = c.length; d < e; d++) {
-          var l = c[d];
-          k[getName(l)] = l;
-        }
-        c = 0;
-        for (d = a.length; c < d; c++) {
-          l = getName((e = a[c]).typeCondition), l = m[l] || (m[l] = []), e.name.value += l.length, 
-          l.push({
-            key: b,
-            fragment: e
-          });
-        }
-      }
-    }, p = function(a) {
-      "teardown" === a.operationName && h.delete(a.key);
-    };
-    return function(a) {
-      return e(wonka.map(n)(wonka.tap(p)(wonka.tap(l)(a))));
-    };
-  };
-};
-
+exports.populateExchange = populateExchange;
 exports.query = query;
-
 exports.read = read;
-
 exports.write = write;
-
 exports.writeFragment = writeFragment;
-
 exports.writeOptimistic = writeOptimistic;
 //# sourceMappingURL=urql-exchange-graphcache.js.map

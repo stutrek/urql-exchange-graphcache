@@ -68,12 +68,8 @@ const terserMinified = terser({
   ecma: 5,
   ie8: false,
   toplevel: true,
-  mangle: true,
-  compress: {
-    keep_infinity: true,
-    pure_getters: true,
-    passes: 10
-  },
+  mangle: false,
+  compress:false,
   output: {
     comments: false
   }
@@ -152,12 +148,12 @@ const makePlugins = (isProduction = false, useSimpleOptimizations = true) => [
     replace({
       'process.env.NODE_ENV': JSON.stringify('production'),
     }),
-  compiler({
-    compilation_level: useSimpleOptimizations
-      ? 'SIMPLE_OPTIMIZATIONS'
-      : 'ADVANCED_OPTIMIZATIONS'
-  }),
-  isProduction ? terserMinified : terserPretty,
+  // compiler({
+  //   compilation_level: useSimpleOptimizations
+  //     ? 'SIMPLE_OPTIMIZATIONS'
+  //     : 'ADVANCED_OPTIMIZATIONS'
+  // }),
+  // isProduction ? terserMinified : terserPretty,
 ];
 
 const config = {

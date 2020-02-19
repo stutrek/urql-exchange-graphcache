@@ -1,191 +1,353 @@
-import { stringifyVariables } from "urql/core";
+import { stringifyVariables } from 'urql/core';
 
-function r() {
-  return (r = Object.assign || function(a) {
-    for (var d = 1; d < arguments.length; d++) {
-      var c, e = arguments[d];
-      for (c in e) {
-        Object.prototype.hasOwnProperty.call(e, c) && (a[c] = e[c]);
+function _extends() {
+  _extends = Object.assign || function (target) {
+    for (var i = 1; i < arguments.length; i++) {
+      var source = arguments[i];
+
+      for (var key in source) {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+          target[key] = source[key];
+        }
       }
     }
-    return a;
-  }).apply(this, arguments);
+
+    return target;
+  };
+
+  return _extends.apply(this, arguments);
 }
 
-var v = {
-  __typename: "PageInfo",
+var defaultPageInfo = {
+  __typename: 'PageInfo',
   endCursor: null,
   startCursor: null,
-  hasNextPage: !1,
-  hasPreviousPage: !1
+  hasNextPage: false,
+  hasPreviousPage: false
 };
 
-function y(a) {
-  return "string" == typeof a ? a : null;
-}
+var ensureKey = function (x) {
+  return typeof x === 'string' ? x : null;
+};
 
-function A(a, d, e) {
-  for (var c = new Set, b = 0, g = d.length; b < g; b++) {
-    var p = a.resolve(d[b], "node");
-    "string" == typeof p && c.add(p);
-  }
-  d = d.slice();
-  b = 0;
-  for (g = e.length; b < g; b++) {
-    var l = a.resolve(p = e[b], "node");
-    "string" != typeof l || c.has(l) || (c.add(l), d.push(p));
-  }
-  return d;
-}
+var concatEdges = function (cache, leftEdges, rightEdges) {
+  var ids = new Set();
 
-function B(a, d) {
-  for (var e in d) {
-    if ("first" !== e && "last" !== e && "after" !== e && "before" !== e) {
-      if (!(e in a)) {
-        return !1;
-      }
-      var c = a[e], b = d[e];
-      if (typeof c != typeof b || "object" != typeof c ? c !== b : stringifyVariables(c) !== stringifyVariables(b)) {
-        return !1;
-      }
+  for (var i = 0, l = leftEdges.length; i < l; i++) {
+    var edge = leftEdges[i];
+    var node = cache.resolve(edge, 'node');
+
+    if (typeof node === 'string') {
+      ids.add(node);
     }
   }
-  for (var g in a) {
-    if ("first" !== g && "last" !== g && "after" !== g && "before" !== g && !(g in d)) {
-      return !1;
+
+  var newEdges = leftEdges.slice();
+
+  for (var i$1 = 0, l$1 = rightEdges.length; i$1 < l$1; i$1++) {
+    var edge$1 = rightEdges[i$1];
+    var node$1 = cache.resolve(edge$1, 'node');
+
+    if (typeof node$1 === 'string' && !ids.has(node$1)) {
+      ids.add(node$1);
+      newEdges.push(edge$1);
     }
   }
-  return !0;
-}
 
-function C(a, d, e) {
-  var c = y(a.resolveFieldByKey(d, e));
-  if (!c) {
+  return newEdges;
+};
+
+var compareArgs = function (fieldArgs, connectionArgs) {
+  for (var key in connectionArgs) {
+    if (key === 'first' || key === 'last' || key === 'after' || key === 'before') {
+      continue;
+    } else if (!(key in fieldArgs)) {
+      return false;
+    }
+
+    var argA = fieldArgs[key];
+    var argB = connectionArgs[key];
+
+    if (typeof argA !== typeof argB || typeof argA !== 'object' ? argA !== argB : stringifyVariables(argA) !== stringifyVariables(argB)) {
+      return false;
+    }
+  }
+
+  for (var key$1 in fieldArgs) {
+    if (key$1 === 'first' || key$1 === 'last' || key$1 === 'after' || key$1 === 'before') {
+      continue;
+    }
+
+    if (!(key$1 in connectionArgs)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+var getPage = function (cache, entityKey, fieldKey) {
+  var link = ensureKey(cache.resolveFieldByKey(entityKey, fieldKey));
+
+  if (!link) {
     return null;
   }
-  d = a.resolve(c, "__typename");
-  e = a.resolve(c, "edges") || [];
-  if ("string" != typeof d) {
+
+  var typename = cache.resolve(link, '__typename');
+  var edges = cache.resolve(link, 'edges') || [];
+
+  if (typeof typename !== 'string') {
     return null;
   }
-  d = {
-    __typename: d,
-    edges: e,
-    pageInfo: v
+
+  var page = {
+    __typename: typename,
+    edges: edges,
+    pageInfo: defaultPageInfo
   };
-  var b = a.resolve(c, "pageInfo");
-  if ("string" == typeof b) {
-    c = y(a.resolve(b, "__typename"));
-    var g = y(a.resolve(b, "endCursor")), p = y(a.resolve(b, "startCursor")), l = a.resolve(b, "hasNextPage");
-    b = a.resolve(b, "hasPreviousPage");
-    null === (c = d.pageInfo = {
-      __typename: "string" == typeof c ? c : "PageInfo",
-      hasNextPage: "boolean" == typeof l ? l : !!g,
-      hasPreviousPage: "boolean" == typeof b ? b : !!p,
-      endCursor: g,
-      startCursor: p
-    }).endCursor && (g = e[e.length - 1]) && (g = a.resolve(g, "cursor"), c.endCursor = y(g));
-    null === c.startCursor && (e = e[0]) && (a = a.resolve(e, "cursor"), c.startCursor = y(a));
-  }
-  return d;
-}
+  var pageInfoKey = cache.resolve(link, 'pageInfo');
 
-var relayPagination = function(a) {
-  void 0 === a && (a = {});
-  var d = a.mergeMode || "inwards";
-  return function(a, c, b, g) {
-    var e = g.fieldName, l = b.inspectFields(a = g.parentKey).filter((function(b) {
-      return b.fieldName === e;
-    })), x = l.length;
-    if (0 !== x) {
-      for (var u = null, q = [], n = [], h = r({}, v), m = 0; m < x; m++) {
-        var k = l[m], f = k.fieldKey;
-        null !== (k = k.arguments) && B(c, k) && (null !== (f = C(b, a, f)) && ("inwards" === d && "number" == typeof k.last && "number" == typeof k.first ? (h = f.edges.slice(0, k.first + 1), 
-        k = f.edges.slice(-k.last), q = A(b, q, h), n = A(b, k, n), h = f.pageInfo) : k.after ? (q = A(b, q, f.edges), 
-        h.endCursor = f.pageInfo.endCursor, h.hasNextPage = f.pageInfo.hasNextPage) : k.before ? (n = A(b, f.edges, n), 
-        h.startCursor = f.pageInfo.startCursor, h.hasPreviousPage = f.pageInfo.hasPreviousPage) : ("number" == typeof k.last ? n = A(b, n, f.edges) : q = A(b, q, f.edges), 
-        h = f.pageInfo), f.pageInfo.__typename !== h.__typename && (h.__typename = f.pageInfo.__typename), 
-        u !== f.__typename && (u = f.__typename)));
-      }
-      if ("string" == typeof u) {
-        if (!y(b.resolve(a, e, c))) {
-          if (void 0 === g.schemaPredicates) {
-            return;
-          }
-          g.partial = !0;
-        }
-        return {
-          __typename: u,
-          edges: "inwards" === d ? A(b, q, n) : A(b, n, q),
-          pageInfo: {
-            __typename: h.__typename,
-            endCursor: h.endCursor,
-            startCursor: h.startCursor,
-            hasNextPage: h.hasNextPage,
-            hasPreviousPage: h.hasPreviousPage
-          }
-        };
+  if (typeof pageInfoKey === 'string') {
+    var pageInfoType = ensureKey(cache.resolve(pageInfoKey, '__typename'));
+    var endCursor = ensureKey(cache.resolve(pageInfoKey, 'endCursor'));
+    var startCursor = ensureKey(cache.resolve(pageInfoKey, 'startCursor'));
+    var hasNextPage = cache.resolve(pageInfoKey, 'hasNextPage');
+    var hasPreviousPage = cache.resolve(pageInfoKey, 'hasPreviousPage');
+    var pageInfo = page.pageInfo = {
+      __typename: typeof pageInfoType === 'string' ? pageInfoType : 'PageInfo',
+      hasNextPage: typeof hasNextPage === 'boolean' ? hasNextPage : !!endCursor,
+      hasPreviousPage: typeof hasPreviousPage === 'boolean' ? hasPreviousPage : !!startCursor,
+      endCursor: endCursor,
+      startCursor: startCursor
+    };
+
+    if (pageInfo.endCursor === null) {
+      var edge = edges[edges.length - 1];
+
+      if (edge) {
+        var endCursor$1 = cache.resolve(edge, 'cursor');
+        pageInfo.endCursor = ensureKey(endCursor$1);
       }
     }
+
+    if (pageInfo.startCursor === null) {
+      var edge$1 = edges[0];
+
+      if (edge$1) {
+        var startCursor$1 = cache.resolve(edge$1, 'cursor');
+        pageInfo.startCursor = ensureKey(startCursor$1);
+      }
+    }
+  }
+
+  return page;
+};
+
+var relayPagination = function (params) {
+  if (params === void 0) params = {};
+  var mergeMode = params.mergeMode || 'inwards';
+  return function (_parent, fieldArgs, cache, info) {
+    var entityKey = info.parentKey;
+    var fieldName = info.fieldName;
+    var allFields = cache.inspectFields(entityKey);
+    var fieldInfos = allFields.filter(function (info) {
+      return info.fieldName === fieldName;
+    });
+    var size = fieldInfos.length;
+
+    if (size === 0) {
+      return undefined;
+    }
+
+    var typename = null;
+    var startEdges = [];
+    var endEdges = [];
+
+    var pageInfo = _extends({}, defaultPageInfo);
+
+    for (var i = 0; i < size; i++) {
+      var ref = fieldInfos[i];
+      var fieldKey = ref.fieldKey;
+      var args = ref.arguments;
+
+      if (args === null || !compareArgs(fieldArgs, args)) {
+        continue;
+      }
+
+      var page = getPage(cache, entityKey, fieldKey);
+
+      if (page === null) {
+        continue;
+      }
+
+      if (mergeMode === 'inwards' && typeof args.last === 'number' && typeof args.first === 'number') {
+        var firstEdges = page.edges.slice(0, args.first + 1);
+        var lastEdges = page.edges.slice(-args.last);
+        startEdges = concatEdges(cache, startEdges, firstEdges);
+        endEdges = concatEdges(cache, lastEdges, endEdges);
+        pageInfo = page.pageInfo;
+      } else if (args.after) {
+        startEdges = concatEdges(cache, startEdges, page.edges);
+        pageInfo.endCursor = page.pageInfo.endCursor;
+        pageInfo.hasNextPage = page.pageInfo.hasNextPage;
+      } else if (args.before) {
+        endEdges = concatEdges(cache, page.edges, endEdges);
+        pageInfo.startCursor = page.pageInfo.startCursor;
+        pageInfo.hasPreviousPage = page.pageInfo.hasPreviousPage;
+      } else if (typeof args.last === 'number') {
+        endEdges = concatEdges(cache, endEdges, page.edges);
+        pageInfo = page.pageInfo;
+      } else {
+        startEdges = concatEdges(cache, startEdges, page.edges);
+        pageInfo = page.pageInfo;
+      }
+
+      if (page.pageInfo.__typename !== pageInfo.__typename) {
+        pageInfo.__typename = page.pageInfo.__typename;
+      }
+
+      if (typename !== page.__typename) {
+        typename = page.__typename;
+      }
+    }
+
+    if (typeof typename !== 'string') {
+      return undefined;
+    }
+
+    var hasCurrentPage = !!ensureKey(cache.resolve(entityKey, fieldName, fieldArgs));
+
+    if (!hasCurrentPage) {
+      if (info.schemaPredicates === undefined) {
+        return undefined;
+      } else {
+        info.partial = true;
+      }
+    }
+
+    return {
+      __typename: typename,
+      edges: mergeMode === 'inwards' ? concatEdges(cache, startEdges, endEdges) : concatEdges(cache, endEdges, startEdges),
+      pageInfo: {
+        __typename: pageInfo.__typename,
+        endCursor: pageInfo.endCursor,
+        startCursor: pageInfo.startCursor,
+        hasNextPage: pageInfo.hasNextPage,
+        hasPreviousPage: pageInfo.hasPreviousPage
+      }
+    };
   };
 };
 
-var simplePagination = function(a) {
-  function d(b, a) {
-    for (var d in a) {
-      if (d !== e && d !== c) {
-        if (!(d in b)) {
-          return !1;
-        }
-        var g = b[d], x = a[d];
-        if (typeof g != typeof x || "object" != typeof g ? g !== x : stringifyVariables(g) !== stringifyVariables(x)) {
-          return !1;
-        }
+var simplePagination = function (ref) {
+  if (ref === void 0) ref = {};
+  var offsetArgument = ref.offsetArgument;
+  if (offsetArgument === void 0) offsetArgument = 'skip';
+  var limitArgument = ref.limitArgument;
+  if (limitArgument === void 0) limitArgument = 'limit';
+
+  var compareArgs = function (fieldArgs, connectionArgs) {
+    for (var key in connectionArgs) {
+      if (key === offsetArgument || key === limitArgument) {
+        continue;
+      } else if (!(key in fieldArgs)) {
+        return false;
+      }
+
+      var argA = fieldArgs[key];
+      var argB = connectionArgs[key];
+
+      if (typeof argA !== typeof argB || typeof argA !== 'object' ? argA !== argB : stringifyVariables(argA) !== stringifyVariables(argB)) {
+        return false;
       }
     }
-    for (var u in b) {
-      if (u !== e && u !== c && !(u in a)) {
-        return !1;
+
+    for (var key$1 in fieldArgs) {
+      if (key$1 === offsetArgument || key$1 === limitArgument) {
+        continue;
+      }
+
+      if (!(key$1 in connectionArgs)) {
+        return false;
       }
     }
-    return !0;
-  }
-  void 0 === a && (a = {});
-  var e = a.offsetArgument;
-  void 0 === e && (e = "skip");
-  var c = a.limitArgument;
-  void 0 === c && (c = "limit");
-  return function(a, c, p, l) {
-    var b = l.fieldName, g = p.inspectFields(a = l.parentKey).filter((function(a) {
-      return a.fieldName === b;
-    })), q = g.length;
-    if (0 !== q) {
-      for (var n = new Set, h = [], m = null, k = 0; k < q; k++) {
-        var f = g[k], t = f.fieldKey;
-        if (null !== (f = f.arguments) && d(c, f) && (t = p.resolveFieldByKey(a, t), f = f[e], 
-        null !== t && 0 !== t.length && "number" == typeof f)) {
-          if (!m || f > m) {
-            for (m = 0; m < t.length; m++) {
-              var w = t[m];
-              n.has(w) || (h.push(w), n.add(w));
-            }
-          } else {
-            m = [];
-            for (w = 0; w < t.length; w++) {
-              var z = t[w];
-              n.has(z) || (m.push(z), n.add(z));
-            }
-            h = m.concat(h);
+
+    return true;
+  };
+
+  return function (_parent, fieldArgs, cache, info) {
+    var entityKey = info.parentKey;
+    var fieldName = info.fieldName;
+    var allFields = cache.inspectFields(entityKey);
+    var fieldInfos = allFields.filter(function (info) {
+      return info.fieldName === fieldName;
+    });
+    var size = fieldInfos.length;
+
+    if (size === 0) {
+      return undefined;
+    }
+
+    var visited = new Set();
+    var result = [];
+    var prevOffset = null;
+
+    for (var i = 0; i < size; i++) {
+      var ref = fieldInfos[i];
+      var fieldKey = ref.fieldKey;
+      var args = ref.arguments;
+
+      if (args === null || !compareArgs(fieldArgs, args)) {
+        continue;
+      }
+
+      var links = cache.resolveFieldByKey(entityKey, fieldKey);
+      var currentOffset = args[offsetArgument];
+
+      if (links === null || links.length === 0 || typeof currentOffset !== 'number') {
+        continue;
+      }
+
+      if (!prevOffset || currentOffset > prevOffset) {
+        for (var j = 0; j < links.length; j++) {
+          var link = links[j];
+
+          if (visited.has(link)) {
+            continue;
           }
-          m = f;
+
+          result.push(link);
+          visited.add(link);
         }
+      } else {
+        var tempResult = [];
+
+        for (var j$1 = 0; j$1 < links.length; j$1++) {
+          var link$1 = links[j$1];
+
+          if (visited.has(link$1)) {
+            continue;
+          }
+
+          tempResult.push(link$1);
+          visited.add(link$1);
+        }
+
+        result = tempResult.concat(result);
       }
-      if (p.resolve(a, b, c)) {
-        return h;
-      }
-      if (void 0 !== l.schemaPredicates) {
-        return l.partial = !0, h;
-      }
+
+      prevOffset = currentOffset;
+    }
+
+    var hasCurrentPage = cache.resolve(entityKey, fieldName, fieldArgs);
+
+    if (hasCurrentPage) {
+      return result;
+    } else if (info.schemaPredicates === undefined) {
+      return undefined;
+    } else {
+      info.partial = true;
+      return result;
     }
   };
 };
