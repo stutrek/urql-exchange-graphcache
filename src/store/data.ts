@@ -9,7 +9,7 @@ import { invariant, currentDebugStack } from '../helpers/help';
 import { fieldInfoOfKey, joinKeys, prefixKey } from './keys';
 import { defer } from './timing';
 
-import { observable } from 'mobx';
+import { observable, action } from 'mobx';
 
 type Dict<T> = Record<string, T>;
 type KeyMap<T> = Map<string, T>;
@@ -379,18 +379,16 @@ export const readLink = (
 };
 
 /** Writes an entity's field (a "record") to data */
-export const writeRecord = (
-  entityKey: string,
-  fieldKey: string,
-  value: EntityField
-) => {
-  updateDependencies(entityKey, fieldKey);
-  setNode(currentData!.records, entityKey, fieldKey, value);
-  if (currentData!.storage && !currentOptimisticKey) {
-    const key = prefixKey('r', joinKeys(entityKey, fieldKey));
-    currentData!.persistenceBatch[key] = value;
+export const writeRecord = action(
+  (entityKey: string, fieldKey: string, value: EntityField) => {
+    updateDependencies(entityKey, fieldKey);
+    setNode(currentData!.records, entityKey, fieldKey, value);
+    if (currentData!.storage && !currentOptimisticKey) {
+      const key = prefixKey('r', joinKeys(entityKey, fieldKey));
+      currentData!.persistenceBatch[key] = value;
+    }
   }
-};
+);
 
 export const hasField = (entityKey: string, fieldKey: string): boolean =>
   readRecord(entityKey, fieldKey) !== undefined ||

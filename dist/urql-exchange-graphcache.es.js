@@ -1,4 +1,4 @@
-import { observable, action } from 'mobx';
+import { action, observable } from 'mobx';
 import { isWrappingType, Kind, valueFromASTUntyped, buildClientSchema, isNullableType, isNonNullType, isListType, GraphQLObjectType, GraphQLInterfaceType, GraphQLUnionType, visit, visitWithTypeInfo, TypeInfo, isCompositeType, isAbstractType } from 'graphql';
 import { stringifyVariables, createRequest, formatDocument } from 'urql/core';
 import { share, mergeMap, fromArray, take, buffer, fromPromise, empty, tap, map, concat, filter, merge } from 'wonka';
@@ -460,7 +460,7 @@ var readLink = function (entityKey, fieldKey) {
 };
 /** Writes an entity's field (a "record") to data */
 
-var writeRecord = function (entityKey, fieldKey, value) {
+var writeRecord = action(function (entityKey, fieldKey, value) {
   updateDependencies(entityKey, fieldKey);
   setNode(currentData.records, entityKey, fieldKey, value);
 
@@ -468,7 +468,7 @@ var writeRecord = function (entityKey, fieldKey, value) {
     var key = prefixKey('r', joinKeys(entityKey, fieldKey));
     currentData.persistenceBatch[key] = value;
   }
-};
+});
 var hasField = function (entityKey, fieldKey) {
   return readRecord(entityKey, fieldKey) !== undefined || readLink(entityKey, fieldKey) !== undefined;
 };
@@ -636,12 +636,12 @@ var ensureData = function (x) {
 
 /** Writes a request given its response to the store */
 
-var write = function (store, request, data) {
+var write = action(function (store, request, data) {
   initDataState(store.data, 0);
   var result = startWrite(store, request, data);
   clearDataState();
   return result;
-};
+});
 var startWrite = function (store, request, data) {
   var operation = getMainOperation(request.query);
   var result = {

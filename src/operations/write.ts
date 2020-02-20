@@ -35,6 +35,7 @@ import {
 import * as InMemoryData from '../store/data';
 import { invariant, warn, pushDebugNode } from '../helpers/help';
 import { SelectionIterator, ensureData } from './shared';
+import { action } from 'mobx';
 
 export interface WriteResult {
   dependencies: Set<string>;
@@ -54,16 +55,14 @@ interface Context {
 }
 
 /** Writes a request given its response to the store */
-export const write = (
-  store: Store,
-  request: OperationRequest,
-  data: Data
-): WriteResult => {
-  initDataState(store.data, 0);
-  const result = startWrite(store, request, data);
-  clearDataState();
-  return result;
-};
+export const write = action(
+  (store: Store, request: OperationRequest, data: Data): WriteResult => {
+    initDataState(store.data, 0);
+    const result = startWrite(store, request, data);
+    clearDataState();
+    return result;
+  }
+);
 
 export const startWrite = (
   store: Store,
